@@ -21,7 +21,14 @@
 /* Obision TopBar Container */
 .obision-topbar-container {
     background-color: transparent;
-    padding: 4px;
+    padding: 0px;
+}
+
+.obision-topbar-container #panel {
+    background-color: rgba(0, 0, 0, 0.8);
+    border-radius: 0px;
+    min-width: 0px;
+    width: auto;
 }
 
 /* Make native dash fit our container */

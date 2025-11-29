@@ -1,5 +1,6 @@
 import { Extension } from 'resource:///org/gnome/shell/extensions/extension.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
+import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 import St from 'gi://St';
 import Shell from 'gi://Shell';
 import Meta from 'gi://Meta';
@@ -17,6 +18,11 @@ export default class ObisionExtensionDash extends Extension {
         this._panel = null;
         this._dashContainer = null;
         this._topBarContainer = null;
+        this._originalTopPanelParent = null;
+        this._topPanel = null;
+        this._menu = null;
+        this._panelButtonPressId = null;
+        this._stageButtonPressId = null;
     }
 
     enable() {
@@ -46,16 +52,42 @@ export default class ObisionExtensionDash extends Extension {
         this._dashContainer = new St.BoxLayout({
             name: 'obision-dash-container',
             style_class: 'obision-dash-container',
-            x_expand: true,
-            y_expand: true,
+            x_expand: false,
+            y_expand: false,
+            x_align: Clutter.ActorAlign.START,
+            y_align: Clutter.ActorAlign.START,
             clip_to_allocation: true,
         });
         
-        // Create top-bar container (for future elements)
+        // Create top-bar container (will hold the top panel)
         this._topBarContainer = new St.BoxLayout({
             name: 'obision-topbar-container',
             style_class: 'obision-topbar-container',
+            x_expand: true,
+            y_expand: false,
+            x_align: Clutter.ActorAlign.END,
         });
+        
+        // Get and move the top panel
+        this._topPanel = Main.panel;
+        this._originalTopPanelParent = this._topPanel.get_parent();
+        
+        if (this._originalTopPanelParent) {
+            this._originalTopPanelParent.remove_child(this._topPanel);
+        }
+        
+        // Hide the original panel container space
+        if (Main.layoutManager.panelBox) {
+            Main.layoutManager.panelBox.hide();
+        }
+        
+        // Hide the Activities button
+        if (this._topPanel.statusArea.activities) {
+            this._topPanel.statusArea.activities.container.hide();
+        }
+        
+        // Add top panel to our container
+        this._topBarContainer.add_child(this._topPanel);
         
         // Remove dash from overview
         if (this._originalDashParent) {
@@ -65,9 +97,16 @@ export default class ObisionExtensionDash extends Extension {
         // Add dash to dash container
         this._dashContainer.add_child(this._dash);
         
+        // Prevent dash from centering - keep icons at start
+        this._dash._box.x_align = Clutter.ActorAlign.START;
+        this._dash._box.y_align = Clutter.ActorAlign.START;
+        
         // Add containers to main panel
         this._panel.add_child(this._dashContainer);
         this._panel.add_child(this._topBarContainer);
+        
+        // Create context menu
+        this._createContextMenu();
         
         // Add panel to stage as chrome (always visible)
         Main.layoutManager.addChrome(this._panel, {
@@ -103,12 +142,27 @@ export default class ObisionExtensionDash extends Extension {
             }
         });
         
-        // Monitor when items are added to ensure they stay visible
+        // Monitor when items are added to ensure they stay visible and have correct height
         if (this._dash._box) {
-            this._dashBoxChildAddedId = this._dash._box.connect('child-added', () => {
+            this._dashBoxChildAddedId = this._dash._box.connect('child-added', (box, child) => {
+                log('Child added to dash box, updating visibility and height');
                 this._dash.visible = true;
                 this._dash.show();
-                this._updateDashSize(this._panel.width, this._panel.height);
+                
+                // Force height on the newly added child
+                const padding = this._settings.get_int('panel-padding');
+                const containerHeight = this._panel.height - (padding * 2);
+                
+                child.natural_height = containerHeight;
+                child.min_height = containerHeight;
+                child.height = containerHeight;
+                
+                const button = child.first_child;
+                if (button) {
+                    button.natural_height = containerHeight;
+                    button.min_height = containerHeight;
+                    button.height = containerHeight;
+                }
             });
         }
         
@@ -170,9 +224,45 @@ export default class ObisionExtensionDash extends Extension {
             this._dashBoxChildAddedId = null;
         }
         
+        // Disconnect menu signals
+        if (this._panelButtonPressId && this._panel) {
+            this._panel.disconnect(this._panelButtonPressId);
+            this._panelButtonPressId = null;
+        }
+        
+        if (this._stageButtonPressId) {
+            global.stage.disconnect(this._stageButtonPressId);
+            this._stageButtonPressId = null;
+        }
+        
+        // Destroy context menu
+        if (this._menu) {
+            this._menu.destroy();
+            this._menu = null;
+        }
+        
         // Restore dash to overview
         if (this._dash && this._dashContainer) {
             this._dashContainer.remove_child(this._dash);
+        }
+        
+        // Restore top panel
+        if (this._topPanel && this._topBarContainer) {
+            this._topBarContainer.remove_child(this._topPanel);
+        }
+        
+        // Restore the Activities button
+        if (this._topPanel && this._topPanel.statusArea.activities) {
+            this._topPanel.statusArea.activities.container.show();
+        }
+        
+        if (this._topPanel && this._originalTopPanelParent) {
+            this._originalTopPanelParent.add_child(this._topPanel);
+        }
+        
+        // Show the original panel container
+        if (Main.layoutManager.panelBox) {
+            Main.layoutManager.panelBox.show();
         }
         
         // Clean up containers
@@ -204,6 +294,8 @@ export default class ObisionExtensionDash extends Extension {
         this._dash = null;
         this._originalDashParent = null;
         this._originalDashIndex = null;
+        this._topPanel = null;
+        this._originalTopPanelParent = null;
         this._settings = null;
         
         log('Obision Extension Dash disabled');
@@ -216,16 +308,17 @@ export default class ObisionExtensionDash extends Extension {
         const position = this._settings.get_string('dash-position');
         const dashSize = this._settings.get_int('dash-size');
         
-        // Get top panel height (usually 32px in GNOME)
-        const topPanelHeight = Main.panel ? Main.panel.height : 0;
+        // Get top panel height (it's now inside our container)
+        const topPanelHeight = this._topPanel ? this._topPanel.height : 0;
         
         switch (position) {
             case 'TOP':
                 this._panel.set_position(
                     monitor.x,
-                    monitor.y + topPanelHeight
+                    monitor.y
                 );
-                this._panel.set_size(monitor.width, dashSize);
+                // Total height includes top panel + dash
+                this._panel.set_size(monitor.width, topPanelHeight + dashSize);
                 this._panel.vertical = false;
                 this._dashContainer.vertical = false;
                 this._topBarContainer.vertical = false;
@@ -236,9 +329,10 @@ export default class ObisionExtensionDash extends Extension {
             case 'BOTTOM':
                 this._panel.set_position(
                     monitor.x,
-                    monitor.y + monitor.height - dashSize
+                    monitor.y + monitor.height - (topPanelHeight + dashSize)
                 );
-                this._panel.set_size(monitor.width, dashSize);
+                // Total height includes top panel + dash
+                this._panel.set_size(monitor.width, topPanelHeight + dashSize);
                 this._panel.vertical = false;
                 this._dashContainer.vertical = false;
                 this._topBarContainer.vertical = false;
@@ -249,9 +343,9 @@ export default class ObisionExtensionDash extends Extension {
             case 'LEFT':
                 this._panel.set_position(
                     monitor.x,
-                    monitor.y + topPanelHeight
+                    monitor.y
                 );
-                this._panel.set_size(dashSize, monitor.height - topPanelHeight);
+                this._panel.set_size(dashSize, monitor.height);
                 this._panel.vertical = true;
                 this._dashContainer.vertical = true;
                 this._topBarContainer.vertical = true;
@@ -262,9 +356,9 @@ export default class ObisionExtensionDash extends Extension {
             case 'RIGHT':
                 this._panel.set_position(
                     monitor.x + monitor.width - dashSize,
-                    monitor.y + topPanelHeight
+                    monitor.y
                 );
-                this._panel.set_size(dashSize, monitor.height - topPanelHeight);
+                this._panel.set_size(dashSize, monitor.height);
                 this._panel.vertical = true;
                 this._dashContainer.vertical = true;
                 this._topBarContainer.vertical = true;
@@ -344,5 +438,78 @@ export default class ObisionExtensionDash extends Extension {
         if (this._panel) {
             this._panel.visible = !this._panel.visible;
         }
+    }
+
+    _createContextMenu() {
+        // Create popup menu with no source actor
+        this._menu = new PopupMenu.PopupMenu(null, 0.0, St.Side.TOP);
+        Main.uiGroup.add_child(this._menu.actor);
+        this._menu.actor.hide();
+        
+        // Add menu item for preferences
+        const prefsItem = new PopupMenu.PopupMenuItem('Dash configuration...');
+        prefsItem.connect('activate', () => {
+            this.openPreferences();
+        });
+        this._menu.addMenuItem(prefsItem);
+        
+        // Add separator
+        this._menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
+        
+        // Add example options
+        const option1 = new PopupMenu.PopupMenuItem('Option 1');
+        this._menu.addMenuItem(option1);
+        
+        const option2 = new PopupMenu.PopupMenuItem('Option 2');
+        this._menu.addMenuItem(option2);
+        
+        const option3 = new PopupMenu.PopupMenuItem('Option 3');
+        this._menu.addMenuItem(option3);
+        
+        const option4 = new PopupMenu.PopupMenuItem('Option 4');
+        this._menu.addMenuItem(option4);
+        
+        const option5 = new PopupMenu.PopupMenuItem('Option 5');
+        this._menu.addMenuItem(option5);
+        
+        // Connect right-click to show menu
+        this._panelButtonPressId = this._panel.connect('button-press-event', (actor, event) => {
+            if (event.get_button() === 3) { // Right click
+                // Get click coordinates
+                const [stageX, stageY] = event.get_coords();
+                
+                // Close if already open
+                if (this._menu.isOpen) {
+                    this._menu.close();
+                } else {
+                    // Get menu size to position it above the cursor
+                    this._menu.actor.show();
+                    const [menuWidth, menuHeight] = this._menu.actor.get_size();
+                    
+                    // Position menu above and slightly to the left of cursor
+                    const menuX = Math.floor(stageX - 10);
+                    const menuY = Math.floor(stageY - menuHeight);
+                    
+                    this._menu.actor.set_position(menuX, menuY);
+                    this._menu.open(true);
+                }
+                return Clutter.EVENT_STOP;
+            }
+            return Clutter.EVENT_PROPAGATE;
+        });
+        
+        // Close menu when clicking outside - use capture phase
+        this._stageButtonPressId = global.stage.connect('captured-event', (actor, event) => {
+            if (event.type() === Clutter.EventType.BUTTON_PRESS && this._menu.isOpen) {
+                const [x, y] = event.get_coords();
+                
+                // Check if click is on menu actor
+                const menuActor = this._menu.actor;
+                if (!menuActor.contains(global.stage.get_actor_at_pos(Clutter.PickMode.ALL, x, y))) {
+                    this._menu.close();
+                }
+            }
+            return Clutter.EVENT_PROPAGATE;
+        });
     }
 }
