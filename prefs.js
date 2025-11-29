@@ -236,12 +236,12 @@ class SystemPanelSettingsPage extends Adw.PreferencesPage {
             icon_name: 'preferences-system-symbolic',
         });
 
-        // Date group
-        const dateGroup = new Adw.PreferencesGroup({
-            title: 'Date Display',
-            description: 'Configure date position in top bar',
+        // Date Panel group (first position)
+        const datePanelGroup = new Adw.PreferencesGroup({
+            title: 'Date Panel',
+            description: 'Configure date panel position and spacing',
         });
-        this.add(dateGroup);
+        this.add(datePanelGroup);
 
         // Date position
         const datePositionRow = new Adw.ComboRow({
@@ -263,7 +263,7 @@ class SystemPanelSettingsPage extends Adw.PreferencesPage {
             settings.set_string('date-position', positions[widget.selected]);
         });
         
-        dateGroup.add(datePositionRow);
+        datePanelGroup.add(datePositionRow);
 
         // Date spacing
         const dateSpacingRow = new Adw.SpinRow({
@@ -283,8 +283,108 @@ class SystemPanelSettingsPage extends Adw.PreferencesPage {
             Gio.SettingsBindFlags.DEFAULT
         );
         
-        dateGroup.add(dateSpacingRow);
+        datePanelGroup.add(dateSpacingRow);
+
+        // Time group
+        const timeGroup = new Adw.PreferencesGroup({
+            title: 'Time',
+            description: 'Configure time display',
+        });
+        this.add(timeGroup);
+
+        // Time visibility
+        const timeVisibleRow = new Adw.ActionRow({
+            title: 'Show time',
+            subtitle: 'Display the time in the panel',
+        });
         
+        const timeVisibleSwitch = new Gtk.Switch({
+            active: settings.get_boolean('time-visible'),
+            valign: Gtk.Align.CENTER,
+        });
+        
+        settings.bind(
+            'time-visible',
+            timeVisibleSwitch,
+            'active',
+            Gio.SettingsBindFlags.DEFAULT
+        );
+        
+        timeVisibleRow.add_suffix(timeVisibleSwitch);
+        timeVisibleRow.activatable_widget = timeVisibleSwitch;
+        timeGroup.add(timeVisibleRow);
+
+        // Time font size
+        const timeFontSizeRow = new Adw.SpinRow({
+            title: 'Font size',
+            subtitle: 'Size of time text',
+            adjustment: new Gtk.Adjustment({
+                lower: 8,
+                upper: 30,
+                step_increment: 1,
+            }),
+        });
+        
+        settings.bind(
+            'time-font-size',
+            timeFontSizeRow,
+            'value',
+            Gio.SettingsBindFlags.DEFAULT
+        );
+        
+        timeGroup.add(timeFontSizeRow);
+        
+        // Time font bold
+        const timeFontBoldRow = new Adw.ActionRow({
+            title: 'Bold text',
+            subtitle: 'Make time text bold',
+        });
+        
+        const timeFontBoldSwitch = new Gtk.Switch({
+            active: settings.get_boolean('time-font-bold'),
+            valign: Gtk.Align.CENTER,
+        });
+        
+        settings.bind(
+            'time-font-bold',
+            timeFontBoldSwitch,
+            'active',
+            Gio.SettingsBindFlags.DEFAULT
+        );
+        
+        timeFontBoldRow.add_suffix(timeFontBoldSwitch);
+        timeFontBoldRow.set_activatable_widget(timeFontBoldSwitch);
+        timeGroup.add(timeFontBoldRow);
+
+        // Date group
+        const dateGroup = new Adw.PreferencesGroup({
+            title: 'Date',
+            description: 'Configure date display',
+        });
+        this.add(dateGroup);
+
+        // Date visibility
+        const dateVisibleRow = new Adw.ActionRow({
+            title: 'Show date',
+            subtitle: 'Display the date in the panel',
+        });
+        
+        const dateVisibleSwitch = new Gtk.Switch({
+            active: settings.get_boolean('date-visible'),
+            valign: Gtk.Align.CENTER,
+        });
+        
+        settings.bind(
+            'date-visible',
+            dateVisibleSwitch,
+            'active',
+            Gio.SettingsBindFlags.DEFAULT
+        );
+        
+        dateVisibleRow.add_suffix(dateVisibleSwitch);
+        dateVisibleRow.activatable_widget = dateVisibleSwitch;
+        dateGroup.add(dateVisibleRow);
+
         // Date font size
         const dateFontSizeRow = new Adw.SpinRow({
             title: 'Font size',
@@ -326,6 +426,28 @@ class SystemPanelSettingsPage extends Adw.PreferencesPage {
         dateFontBoldRow.add_suffix(dateFontBoldSwitch);
         dateFontBoldRow.set_activatable_widget(dateFontBoldSwitch);
         dateGroup.add(dateFontBoldRow);
+
+        // Date show year
+        const dateShowYearRow = new Adw.ActionRow({
+            title: 'Show year',
+            subtitle: 'Display the year in the date',
+        });
+        
+        const dateShowYearSwitch = new Gtk.Switch({
+            active: settings.get_boolean('date-show-year'),
+            valign: Gtk.Align.CENTER,
+        });
+        
+        settings.bind(
+            'date-show-year',
+            dateShowYearSwitch,
+            'active',
+            Gio.SettingsBindFlags.DEFAULT
+        );
+        
+        dateShowYearRow.add_suffix(dateShowYearSwitch);
+        dateShowYearRow.set_activatable_widget(dateShowYearSwitch);
+        dateGroup.add(dateShowYearRow);
 
         // Icons group
         const iconsGroup = new Adw.PreferencesGroup({

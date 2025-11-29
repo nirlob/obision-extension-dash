@@ -5,6 +5,7 @@ import St from 'gi://St';
 import Shell from 'gi://Shell';
 import Meta from 'gi://Meta';
 import Clutter from 'gi://Clutter';
+import Pango from 'gi://Pango';
 import Gdk from 'gi://Gdk';
 import GObject from 'gi://GObject';
 import GLib from 'gi://GLib';
@@ -35,6 +36,11 @@ export default class ObisionExtensionDash extends Extension {
         this._originalCenterBoxParent = null;
         this._originalRightBoxParent = null;
         this._originalRightBoxStyle = null;
+        this._clockNotifyId = null;
+        this._clockLabel = null;
+        this._customClockContainer = null;
+        this._customTimeLabel = null;
+        this._customDateLabel = null;
     }
 
     enable() {
@@ -151,9 +157,6 @@ export default class ObisionExtensionDash extends Extension {
         this._panel.add_child(this._dashContainer);
         this._panel.add_child(this._topBarContainer);
         
-        // Apply system icon styling immediately before panel is shown
-        this._updateSystemIconStyling();
-        
         // Create context menu
         this._createContextMenu();
         
@@ -220,9 +223,6 @@ export default class ObisionExtensionDash extends Extension {
             this._updatePanelPosition();
         });
         
-        // Apply initial date position
-        this._updateDatePosition();
-        
         // Connect to settings changes
         this._settingsChangedIds = [
             this._settings.connect('changed::dash-position', () => this._updatePanelPosition()),
@@ -233,22 +233,31 @@ export default class ObisionExtensionDash extends Extension {
             this._settings.connect('changed::background-color', () => this._updatePanelBackground()),
             this._settings.connect('changed::date-position', () => this._updateDatePosition()),
             this._settings.connect('changed::date-spacing', () => this._updateDateSpacing()),
+            this._settings.connect('changed::time-font-size', () => this._updateDateFontSize()),
+            this._settings.connect('changed::time-font-bold', () => this._updateDateFontSize()),
             this._settings.connect('changed::date-font-size', () => this._updateDateFontSize()),
             this._settings.connect('changed::date-font-bold', () => this._updateDateFontSize()),
+            this._settings.connect('changed::time-visible', () => this._updateDateFormat()),
+            this._settings.connect('changed::date-visible', () => this._updateDateFormat()),
+            this._settings.connect('changed::date-show-year', () => this._updateDateFormat()),
             this._settings.connect('changed::system-icon-size', () => this._updateSystemIconStyling()),
             this._settings.connect('changed::system-icon-margins', () => this._updateSystemIconStyling()),
         ];
         
-        // Apply again with a small delay to catch any late-loading indicators
-        GLib.timeout_add(GLib.PRIORITY_DEFAULT, 100, () => {
+        // Apply all styles with delays to ensure panel is ready
+        GLib.timeout_add(GLib.PRIORITY_DEFAULT, 50, () => {
             this._updateSystemIconStyling();
             return GLib.SOURCE_REMOVE;
         });
         
-        // Apply one more time with longer delay to ensure all indicators are loaded
+        GLib.timeout_add(GLib.PRIORITY_DEFAULT, 200, () => {
+            this._updateSystemIconStyling();
+            return GLib.SOURCE_REMOVE;
+        });
+        
         GLib.timeout_add(GLib.PRIORITY_DEFAULT, 500, () => {
             this._updateSystemIconStyling();
-            this._updateDateFontSize();
+            this._updateDatePosition();
             return GLib.SOURCE_REMOVE;
         });
         
@@ -269,6 +278,26 @@ export default class ObisionExtensionDash extends Extension {
         
         // Remove keybinding
         Main.wm.removeKeybinding('toggle-dash');
+        
+        // Disconnect clock format handler
+        if (this._clockNotifyId && this._dateMenu && this._dateMenu._clock) {
+            this._dateMenu._clock.disconnect(this._clockNotifyId);
+            this._clockNotifyId = null;
+        }
+        
+        // Clean up custom clock container
+        if (this._customClockContainer) {
+            this._customClockContainer.destroy();
+            this._customClockContainer = null;
+            this._customTimeLabel = null;
+            this._customDateLabel = null;
+        }
+        
+        // Show original clock label
+        if (this._clockLabel) {
+            this._clockLabel.show();
+            this._clockLabel = null;
+        }
         
         // Disconnect signals
         if (this._monitorsChangedId) {
@@ -517,6 +546,9 @@ export default class ObisionExtensionDash extends Extension {
                 }
             }
         }
+        
+        // Reapply system icon styling after dash size changes
+        this._updateSystemIconStyling();
     }
 
     _updateIconSpacing() {
@@ -755,8 +787,10 @@ export default class ObisionExtensionDash extends Extension {
             
             log('Date moved down below icons');
         } else {
-            // Restore to left position (in center box, aligned right)
-            this._restoreDateMenu();
+            // Restore to left position (in center box, aligned right) only if not already there
+            if (this._dateVerticalContainer) {
+                this._restoreDateMenu();
+            }
             
             // Apply horizontal spacing
             this._updateDateSpacing();
@@ -764,8 +798,8 @@ export default class ObisionExtensionDash extends Extension {
             log('Date moved to left position (in center box)');
         }
         
-        // Apply font size
-        this._updateDateFontSize();
+        // Create/update the custom clock format AFTER positioning
+        this._updateDateFormat();
     }
 
     _updateDateSpacing() {
@@ -783,29 +817,167 @@ export default class ObisionExtensionDash extends Extension {
     }
 
     _updateDateFontSize() {
-        if (!this._dateMenu) return;
+        // Just update the format, don't call _updateDateFormat to avoid loops
+        if (this._customTimeLabel && this._customDateLabel) {
+            // Force an update by triggering the clock handler
+            if (this._dateMenu && this._dateMenu._clock) {
+                this._dateMenu._clock.notify('clock');
+            }
+        }
+    }
+
+    _updateDateFormat() {
+        if (!this._dateMenu) {
+            this._dateMenu = this._topPanel ? this._topPanel.statusArea.dateMenu : null;
+            if (!this._dateMenu) {
+                return;
+            }
+        }
         
-        const fontSize = this._settings.get_int('date-font-size');
-        const fontBold = this._settings.get_boolean('date-font-bold');
-        const fontWeight = fontBold ? 'bold' : 'normal';
+        if (!this._dateMenu._clock) {
+            return;
+        }
         
-        log(`_updateDateFontSize: ${fontSize}px, bold: ${fontBold}`);
+        const timeVisible = this._settings.get_boolean('time-visible');
+        const dateVisible = this._settings.get_boolean('date-visible');
+        const dateShowYear = this._settings.get_boolean('date-show-year');
+        const timeFontSize = this._settings.get_int('time-font-size');
+        const timeFontBold = this._settings.get_boolean('time-font-bold');
+        const dateFontSize = this._settings.get_int('date-font-size');
+        const dateFontBold = this._settings.get_boolean('date-font-bold');
         
-        // Apply font size and weight to all labels in the date menu
-        const applyFontSize = (actor) => {
-            const constructorName = actor.constructor ? actor.constructor.name : '';
+        // Find the original clock label only once
+        if (!this._clockLabel) {
+            const findClockLabel = (actor) => {
+                if (actor.constructor && actor.constructor.name === 'St_Label') {
+                    if (actor.text) {
+                        return actor;
+                    }
+                }
+                if (actor.get_children) {
+                    for (let child of actor.get_children()) {
+                        const found = findClockLabel(child);
+                        if (found) return found;
+                    }
+                }
+                return null;
+            };
+            this._clockLabel = findClockLabel(this._dateMenu.container);
             
-            if (constructorName === 'St_Label') {
-                actor.set_style(`font-size: ${fontSize}px; font-weight: ${fontWeight};`);
+            if (!this._clockLabel) {
+                return;
+            }
+        }
+        
+        // Create custom container only once
+        if (!this._customClockContainer) {
+            // Hide the original clock label
+            this._clockLabel.hide();
+            
+            // Create main vertical container
+            this._customClockContainer = new St.BoxLayout({
+                vertical: true,
+                x_align: Clutter.ActorAlign.CENTER,
+                y_align: Clutter.ActorAlign.CENTER,
+                style: 'spacing: 0px;',
+            });
+            
+            // Create time container with centered panel
+            const timeContainer = new St.BoxLayout({
+                vertical: false,
+                x_align: Clutter.ActorAlign.CENTER,
+                y_align: Clutter.ActorAlign.CENTER,
+            });
+            
+            this._customTimeLabel = new St.Label({
+                text: '',
+                x_align: Clutter.ActorAlign.CENTER,
+            });
+            this._customTimeLabel.clutter_text.line_alignment = Pango.Alignment.CENTER;
+            
+            timeContainer.add_child(this._customTimeLabel);
+            
+            // Create date container with centered panel
+            const dateContainer = new St.BoxLayout({
+                vertical: false,
+                x_align: Clutter.ActorAlign.CENTER,
+                y_align: Clutter.ActorAlign.CENTER,
+            });
+            
+            this._customDateLabel = new St.Label({
+                text: '',
+                x_align: Clutter.ActorAlign.CENTER,
+            });
+            this._customDateLabel.clutter_text.line_alignment = Pango.Alignment.CENTER;
+            
+            dateContainer.add_child(this._customDateLabel);
+            
+            // Add containers to main container
+            this._customClockContainer.add_child(timeContainer);
+            this._customClockContainer.add_child(dateContainer);
+            
+            // Add main container to the dateMenu container
+            this._dateMenu.container.add_child(this._customClockContainer);
+        }
+        
+        // Disconnect previous clock handler if exists
+        if (this._clockNotifyId) {
+            this._dateMenu._clock.disconnect(this._clockNotifyId);
+            this._clockNotifyId = null;
+        }
+        
+        // Update the clock text
+        const updateClockText = () => {
+            if (!this._customTimeLabel || !this._customDateLabel) {
+                return;
             }
             
-            // Recursively apply to all children
-            if (actor.get_children) {
-                actor.get_children().forEach(child => applyFontSize(child));
+            const now = new Date();
+            const hours = String(now.getHours()).padStart(2, '0');
+            const minutes = String(now.getMinutes()).padStart(2, '0');
+            const day = String(now.getDate()).padStart(2, '0');
+            const month = String(now.getMonth() + 1).padStart(2, '0');
+            const year = String(now.getFullYear());
+            
+            const timeWeight = timeFontBold ? 'bold' : 'normal';
+            const dateWeight = dateFontBold ? 'bold' : 'normal';
+            
+            const timeText = `${hours}:${minutes}`;
+            const dateText = dateShowYear ? `${day}/${month}/${year}` : `${day}/${month}`;
+            
+            // Update time label
+            if (timeVisible) {
+                const timeMarkup = `<span font_size="${timeFontSize * 1024}" weight="${timeWeight}">${timeText}</span>`;
+                this._customTimeLabel.clutter_text.set_markup(timeMarkup);
+                this._customTimeLabel.show();
+            } else {
+                this._customTimeLabel.hide();
+            }
+            
+            // Update date label
+            if (dateVisible) {
+                const dateMarkup = `<span font_size="${dateFontSize * 1024}" weight="${dateWeight}">${dateText}</span>`;
+                this._customDateLabel.clutter_text.set_markup(dateMarkup);
+                this._customDateLabel.show();
+            } else {
+                this._customDateLabel.hide();
+            }
+            
+            // Show/hide container
+            if (timeVisible || dateVisible) {
+                this._customClockContainer.show();
+                this._dateMenu.container.show();
+            } else {
+                this._customClockContainer.hide();
+                this._dateMenu.container.hide();
             }
         };
         
-        applyFontSize(this._dateMenu.container);
+        // Update immediately
+        updateClockText();
+        
+        // Connect to clock updates
+        this._clockNotifyId = this._dateMenu._clock.connect('notify::clock', updateClockText);
     }
 
     _restoreDateMenu() {

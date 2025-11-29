@@ -66,6 +66,19 @@
       <description>Vertical space between icons and date in pixels</description>
     </key>
     
+    <key name="time-font-size" type="i">
+      <default>20</default>
+      <range min="8" max="30"/>
+      <summary>Time font size</summary>
+      <description>Font size for time text in pixels</description>
+    </key>
+    
+    <key name="time-font-bold" type="b">
+      <default>false</default>
+      <summary>Time font bold</summary>
+      <description>Make time text bold</description>
+    </key>
+    
     <key name="date-font-size" type="i">
       <default>15</default>
       <range min="8" max="30"/>
@@ -77,6 +90,24 @@
       <default>false</default>
       <summary>Date font bold</summary>
       <description>Make date text bold</description>
+    </key>
+    
+    <key name="time-visible" type="b">
+      <default>true</default>
+      <summary>Show time</summary>
+      <description>Show or hide the time display</description>
+    </key>
+    
+    <key name="date-visible" type="b">
+      <default>true</default>
+      <summary>Show date</summary>
+      <description>Show or hide the date display</description>
+    </key>
+    
+    <key name="date-show-year" type="b">
+      <default>true</default>
+      <summary>Show year in date</summary>
+      <description>Display the year in the date format</description>
     </key>
     
     <key name="system-icon-size" type="i">
