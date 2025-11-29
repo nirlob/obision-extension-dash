@@ -40,26 +40,39 @@
     margin: 0px;
 }
 
+/* Prevent dash from auto-centering */
+.obision-dash-container #dash {
+    -x-align: start;
+    -y-align: start;
+}
+
 /* App icons */
 #dash .dash-item-container {
-    padding: 4px;
+    padding: 0px;
 }
 
 #dash .app-well-app,
 #dash .show-apps {
-    padding: 8px;
+    padding: 4px;
     transition-duration: 200ms;
+    height: 100%;
+    width: 100%;
 }
 
 #dash .app-well-app:hover,
 #dash .show-apps:hover {
     background-color: rgba(255, 255, 255, 0.1);
-    border-radius: 8px;
+    border-radius: 4px;
 }
 
 #dash .app-well-app:active,
 #dash .show-apps:active {
     background-color: rgba(255, 255, 255, 0.2);
+}
+
+#dash .app-well-app .overview-icon,
+#dash .show-apps .overview-icon {
+    padding: 0px;
 }
 
 /* Running app indicator */
@@ -74,5 +87,16 @@
 /* Focus indicator */
 #dash .app-well-app.focused {
     background-color: rgba(255, 255, 255, 0.15);
-    border-radius: 8px;
+    border-radius: 4px;
+}
+
+/* Make icon containers fill available space */
+.obision-dash-container #dash .dash-item-container {
+    height: 100%;
+}
+
+.obision-dash-container #dash .app-well-app,
+.obision-dash-container #dash .show-apps {
+    min-height: 100%;
+    min-width: 100%;
 }

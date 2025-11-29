@@ -36,11 +36,11 @@ class PanelSettingsPage extends Adw.PreferencesPage {
         positionRow.model = positionModel;
         
         const positions = ['LEFT', 'RIGHT', 'TOP', 'BOTTOM'];
-        const currentPosition = this._settings.get_string('dash-position');
+        const currentPosition = settings.get_string('dash-position');
         positionRow.selected = positions.indexOf(currentPosition);
         
         positionRow.connect('notify::selected', (widget) => {
-            this._settings.set_string('dash-position', positions[widget.selected]);
+            settings.set_string('dash-position', positions[widget.selected]);
         });
         
         positionGroup.add(positionRow);
@@ -63,7 +63,7 @@ class PanelSettingsPage extends Adw.PreferencesPage {
             }),
         });
         
-        this._settings.bind(
+        settings.bind(
             'dash-size',
             sizeRow,
             'value',
@@ -83,7 +83,7 @@ class PanelSettingsPage extends Adw.PreferencesPage {
             }),
         });
         
-        this._settings.bind(
+        settings.bind(
             'panel-padding',
             paddingRow,
             'value',
@@ -105,7 +105,7 @@ class PanelSettingsPage extends Adw.PreferencesPage {
             subtitle: 'Hide panel when not in use',
         });
         
-        this._settings.bind(
+        settings.bind(
             'auto-hide',
             autoHideRow,
             'active',
@@ -125,40 +125,38 @@ class IconsSettingsPage extends Adw.PreferencesPage {
             icon_name: 'applications-graphics-symbolic',
         });
 
-        this._settings = settings;
-
-        // Size group
-        const sizeGroup = new Adw.PreferencesGroup({
-            title: 'Size',
-            description: 'Configure icon size',
+        // Spacing group
+        const spacingGroup = new Adw.PreferencesGroup({
+            title: 'Spacing',
+            description: 'Configure icon spacing',
         });
-        this.add(sizeGroup);
+        this.add(spacingGroup);
 
-        // Icon size
-        const iconSizeRow = new Adw.SpinRow({
-            title: 'Icon Size',
-            subtitle: 'Size of application icons in pixels',
+        // Icon spacing
+        const iconSpacingRow = new Adw.SpinRow({
+            title: 'Icon Spacing',
+            subtitle: 'Space between icons in pixels',
             adjustment: new Gtk.Adjustment({
-                lower: 24,
-                upper: 96,
-                step_increment: 4,
+                lower: 0,
+                upper: 32,
+                step_increment: 2,
             }),
         });
         
-        this._settings.bind(
-            'icon-size',
-            iconSizeRow,
+        settings.bind(
+            'icon-spacing',
+            iconSpacingRow,
             'value',
             Gio.SettingsBindFlags.DEFAULT
         );
         
-        sizeGroup.add(iconSizeRow);
+        spacingGroup.add(iconSpacingRow);
     }
 });
 
 export default class ObisionExtensionDashPreferences extends ExtensionPreferences {
     fillPreferencesWindow(window) {
-        const settings = this.getSettings();
+        const settings = this.getSettings('org.gnome.shell.extensions.obision-extension-dash');
 
         // Add pages
         const panelPage = new PanelSettingsPage(settings);

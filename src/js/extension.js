@@ -5,6 +5,7 @@ import Shell from 'gi://Shell';
 import Meta from 'gi://Meta';
 import Clutter from 'gi://Clutter';
 import GObject from 'gi://GObject';
+import GLib from 'gi://GLib';
 
 export default class ObisionExtensionDash extends Extension {
     constructor(metadata) {
@@ -82,6 +83,19 @@ export default class ObisionExtensionDash extends Extension {
         this._dash.visible = true;
         this._dash.opacity = 255;
         
+        // Connect to dash visibility changes to force it visible
+        this._dashNotifyVisibleId = this._dash.connect('notify::visible', () => {
+            if (!this._dash.visible) {
+                this._dash.visible = true;
+            }
+        });
+        
+        this._dashNotifyOpacityId = this._dash.connect('notify::opacity', () => {
+            if (this._dash.opacity !== 255) {
+                this._dash.opacity = 255;
+            }
+        });
+        
         // Connect to monitor changes
         this._monitorsChangedId = Main.layoutManager.connect('monitors-changed', () => {
             this._updatePanelPosition();
@@ -91,7 +105,7 @@ export default class ObisionExtensionDash extends Extension {
         this._settingsChangedIds = [
             this._settings.connect('changed::dash-position', () => this._updatePanelPosition()),
             this._settings.connect('changed::dash-size', () => this._updatePanelPosition()),
-            this._settings.connect('changed::icon-size', () => this._updatePanelPosition()),
+            this._settings.connect('changed::icon-spacing', () => this._updateIconSpacing()),
             this._settings.connect('changed::panel-padding', () => this._updatePanelPadding()),
         ];
         
@@ -122,6 +136,17 @@ export default class ObisionExtensionDash extends Extension {
         if (this._settingsChangedIds) {
             this._settingsChangedIds.forEach(id => this._settings.disconnect(id));
             this._settingsChangedIds = null;
+        }
+        
+        // Disconnect dash visibility signals
+        if (this._dashNotifyVisibleId && this._dash) {
+            this._dash.disconnect(this._dashNotifyVisibleId);
+            this._dashNotifyVisibleId = null;
+        }
+        
+        if (this._dashNotifyOpacityId && this._dash) {
+            this._dash.disconnect(this._dashNotifyOpacityId);
+            this._dashNotifyOpacityId = null;
         }
         
         // Restore dash to overview
@@ -170,14 +195,14 @@ export default class ObisionExtensionDash extends Extension {
         const position = this._settings.get_string('dash-position');
         const dashSize = this._settings.get_int('dash-size');
         
-        // Get panel height if exists
-        const panelHeight = this._getPanelHeight();
+        // Get top panel height (usually 32px in GNOME)
+        const topPanelHeight = Main.panel ? Main.panel.height : 0;
         
         switch (position) {
             case 'TOP':
                 this._panel.set_position(
                     monitor.x,
-                    monitor.y + panelHeight.top
+                    monitor.y + topPanelHeight
                 );
                 this._panel.set_size(monitor.width, dashSize);
                 this._panel.vertical = false;
@@ -190,7 +215,7 @@ export default class ObisionExtensionDash extends Extension {
             case 'BOTTOM':
                 this._panel.set_position(
                     monitor.x,
-                    monitor.y + monitor.height - dashSize - panelHeight.bottom
+                    monitor.y + monitor.height - dashSize
                 );
                 this._panel.set_size(monitor.width, dashSize);
                 this._panel.vertical = false;
@@ -203,71 +228,54 @@ export default class ObisionExtensionDash extends Extension {
             case 'LEFT':
                 this._panel.set_position(
                     monitor.x,
-                    monitor.y + panelHeight.top
+                    monitor.y + topPanelHeight
                 );
-                this._panel.set_size(dashSize, monitor.height - panelHeight.top - panelHeight.bottom);
+                this._panel.set_size(dashSize, monitor.height - topPanelHeight);
                 this._panel.vertical = true;
                 this._dashContainer.vertical = true;
                 this._topBarContainer.vertical = true;
                 if (this._dash._box) this._dash._box.vertical = true;
-                this._updateDashSize(dashSize, monitor.height - panelHeight.top - panelHeight.bottom);
+                this._updateDashSize(dashSize, monitor.height - topPanelHeight);
                 break;
                 
             case 'RIGHT':
                 this._panel.set_position(
                     monitor.x + monitor.width - dashSize,
-                    monitor.y + panelHeight.top
+                    monitor.y + topPanelHeight
                 );
-                this._panel.set_size(dashSize, monitor.height - panelHeight.top - panelHeight.bottom);
+                this._panel.set_size(dashSize, monitor.height - topPanelHeight);
                 this._panel.vertical = true;
                 this._dashContainer.vertical = true;
                 this._topBarContainer.vertical = true;
                 if (this._dash._box) this._dash._box.vertical = true;
-                this._updateDashSize(dashSize, monitor.height - panelHeight.top - panelHeight.bottom);
+                this._updateDashSize(dashSize, monitor.height - topPanelHeight);
                 break;
         }
-    }
-
-    _getPanelHeight() {
-        const result = { top: 0, bottom: 0 };
-        const monitor = Main.layoutManager.primaryMonitor;
-        
-        // Check all tracked actors for panels
-        Main.layoutManager._trackedActors.forEach(obj => {
-            const actor = obj.actor;
-            if (!actor || !actor.visible) return;
-            
-            const height = actor.height;
-            const y = actor.y;
-            const width = actor.width;
-            
-            // Look for wide actors that span most of the screen (likely panels)
-            const isWideEnough = width >= monitor.width * 0.8;
-            const hasReasonableHeight = height > 20 && height < 200;
-            
-            if (isWideEnough && hasReasonableHeight) {
-                if (y <= monitor.y + 50) {
-                    result.top = Math.max(result.top, height);
-                } else if (y >= monitor.y + monitor.height - height - 50) {
-                    result.bottom = Math.max(result.bottom, height);
-                }
-            }
-        });
-        
-        return result;
     }
 
     _updateDashSize(width, height) {
         if (!this._dash) return;
         
         const padding = this._settings.get_int('panel-padding');
+        const iconSpacing = this._settings.get_int('icon-spacing');
+        
+        // Icon size should fill the available height/width minus padding
         const availableSize = Math.min(width, height) - (padding * 2);
         
-        this._dash.setMaxSize(width, height);
+        // Set icon size
+        this._dash.iconSize = availableSize;
         
-        // Icon size should fill the available height/width
-        const iconSize = Math.min(this._settings.get_int('icon-size'), availableSize);
-        this._dash.iconSize = iconSize;
+        // Apply spacing between icons
+        if (this._dash._box) {
+            this._dash._box.style = `spacing: ${iconSpacing}px;`;
+        }
+    }
+
+    _updateIconSpacing() {
+        if (!this._dash || !this._dash._box) return;
+        
+        const iconSpacing = this._settings.get_int('icon-spacing');
+        this._dash._box.style = `spacing: ${iconSpacing}px;`;
     }
 
     _updatePanelPadding() {

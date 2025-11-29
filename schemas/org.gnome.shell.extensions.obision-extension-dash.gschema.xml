@@ -15,11 +15,11 @@
       <description>Width (for left/right) or height (for top/bottom) of the dash in pixels</description>
     </key>
     
-    <key name="icon-size" type="i">
-      <default>64</default>
-      <range min="24" max="96"/>
-      <summary>Icon size</summary>
-      <description>Size of application icons in pixels</description>
+    <key name="icon-spacing" type="i">
+      <default>8</default>
+      <range min="0" max="32"/>
+      <summary>Icon spacing</summary>
+      <description>Space between icons in pixels</description>
     </key>
     
     <key name="panel-padding" type="i">
