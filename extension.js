@@ -881,53 +881,78 @@ export default class ObisionExtensionDash extends Extension {
         
         // Create custom container only once
         if (!this._customClockContainer) {
-            // Hide the original clock label
+            // Hide original label immediately
             this._clockLabel.hide();
             
-            // Create main vertical container
-            this._customClockContainer = new St.BoxLayout({
-                vertical: true,
-                x_align: Clutter.ActorAlign.CENTER,
-                y_align: Clutter.ActorAlign.CENTER,
-                style: 'spacing: 0px;',
+            // Delay container creation to avoid initial layout issues
+            GLib.timeout_add(GLib.PRIORITY_DEFAULT, 100, () => {
+                this._createCustomClockContainer(timeVisible, dateVisible, dateShowYear, timeFontSize, timeFontBold, dateFontSize, dateFontBold);
+                return GLib.SOURCE_REMOVE;
             });
-            
-            // Create time container with centered panel
-            const timeContainer = new St.BoxLayout({
-                vertical: false,
-                x_align: Clutter.ActorAlign.CENTER,
-                y_align: Clutter.ActorAlign.CENTER,
-            });
-            
-            this._customTimeLabel = new St.Label({
-                text: '',
-                x_align: Clutter.ActorAlign.CENTER,
-            });
-            this._customTimeLabel.clutter_text.line_alignment = Pango.Alignment.CENTER;
-            
-            timeContainer.add_child(this._customTimeLabel);
-            
-            // Create date container with centered panel
-            const dateContainer = new St.BoxLayout({
-                vertical: false,
-                x_align: Clutter.ActorAlign.CENTER,
-                y_align: Clutter.ActorAlign.CENTER,
-            });
-            
-            this._customDateLabel = new St.Label({
-                text: '',
-                x_align: Clutter.ActorAlign.CENTER,
-            });
-            this._customDateLabel.clutter_text.line_alignment = Pango.Alignment.CENTER;
-            
-            dateContainer.add_child(this._customDateLabel);
-            
-            // Add containers to main container
-            this._customClockContainer.add_child(timeContainer);
-            this._customClockContainer.add_child(dateContainer);
-            
-            // Add main container to the dateMenu container
-            this._dateMenu.container.add_child(this._customClockContainer);
+            return;
+        }
+        
+        // Update existing container
+        this._updateClockContent(timeVisible, dateVisible, dateShowYear, timeFontSize, timeFontBold, dateFontSize, dateFontBold);
+    }
+    
+    _createCustomClockContainer(timeVisible, dateVisible, dateShowYear, timeFontSize, timeFontBold, dateFontSize, dateFontBold) {
+        if (this._customClockContainer) {
+            return;
+        }
+        
+        // Create main vertical container
+        this._customClockContainer = new St.BoxLayout({
+            vertical: true,
+            x_align: Clutter.ActorAlign.CENTER,
+            y_align: Clutter.ActorAlign.CENTER,
+            style: 'spacing: 0px;',
+        });
+        
+        // Create time container with centered panel
+        const timeContainer = new St.BoxLayout({
+            vertical: false,
+            x_align: Clutter.ActorAlign.CENTER,
+            y_align: Clutter.ActorAlign.CENTER,
+        });
+        
+        this._customTimeLabel = new St.Label({
+            text: '',
+            x_align: Clutter.ActorAlign.CENTER,
+        });
+        this._customTimeLabel.clutter_text.line_alignment = Pango.Alignment.CENTER;
+        
+        timeContainer.add_child(this._customTimeLabel);
+        
+        // Create date container with centered panel
+        const dateContainer = new St.BoxLayout({
+            vertical: false,
+            x_align: Clutter.ActorAlign.CENTER,
+            y_align: Clutter.ActorAlign.CENTER,
+        });
+        
+        this._customDateLabel = new St.Label({
+            text: '',
+            x_align: Clutter.ActorAlign.CENTER,
+        });
+        this._customDateLabel.clutter_text.line_alignment = Pango.Alignment.CENTER;
+        
+        dateContainer.add_child(this._customDateLabel);
+        
+        // Add containers to main container
+        this._customClockContainer.add_child(timeContainer);
+        this._customClockContainer.add_child(dateContainer);
+        
+        // Add main container to the dateMenu container
+        this._dateMenu.container.add_child(this._customClockContainer);
+        
+        // Now update the content
+        this._updateClockContent(timeVisible, dateVisible, dateShowYear, timeFontSize, timeFontBold, dateFontSize, dateFontBold);
+    }
+    
+    _updateClockContent(timeVisible, dateVisible, dateShowYear, timeFontSize, timeFontBold, dateFontSize, dateFontBold) {
+        if (!this._customClockContainer) {
+            return;
         }
         
         // Disconnect previous clock handler if exists
