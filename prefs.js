@@ -619,32 +619,12 @@ class IconsSettingsPage extends Adw.PreferencesPage {
         
         spacingGroup.add(iconSpacingRow);
 
-        // Icon Panel group
+        // Icon group
         const iconPanelGroup = new Adw.PreferencesGroup({
-            title: 'Icon Panel',
-            description: 'Configure icon appearance',
+            title: 'Icon',
+            description: 'Configure icon appearance and styling',
         });
         this.add(iconPanelGroup);
-
-        // Corner radius
-        const cornerRadiusRow = new Adw.SpinRow({
-            title: 'Corner Round',
-            subtitle: 'Radius for icon background corners in pixels',
-            adjustment: new Gtk.Adjustment({
-                lower: 0,
-                upper: 50,
-                step_increment: 1,
-            }),
-        });
-        
-        settings.bind(
-            'icon-corner-radius',
-            cornerRadiusRow,
-            'value',
-            Gio.SettingsBindFlags.DEFAULT
-        );
-        
-        iconPanelGroup.add(cornerRadiusRow);
 
         // Icon size multiplier
         const iconSizeRow = new Adw.SpinRow({
@@ -768,6 +748,128 @@ class IconsSettingsPage extends Adw.PreferencesPage {
         
         // Set initial sensitivity
         iconBgColorRow.sensitive = !settings.get_boolean('icon-use-main-bg-color');
+
+        // Borders group
+        const bordersGroup = new Adw.PreferencesGroup({
+            title: 'Borders',
+            description: 'Configure icon borders and corner radius',
+        });
+        this.add(bordersGroup);
+
+        // Corner radius
+        const cornerRadiusRow = new Adw.SpinRow({
+            title: 'Corner Round',
+            subtitle: 'Radius for icon background corners in pixels',
+            adjustment: new Gtk.Adjustment({
+                lower: 0,
+                upper: 50,
+                step_increment: 1,
+            }),
+        });
+        
+        settings.bind(
+            'icon-corner-radius',
+            cornerRadiusRow,
+            'value',
+            Gio.SettingsBindFlags.DEFAULT
+        );
+        
+        bordersGroup.add(cornerRadiusRow);
+
+        // Show border switch
+        const showBorderRow = new Adw.SwitchRow({
+            title: 'Show Border',
+            subtitle: 'Display border around icon backgrounds',
+        });
+        
+        settings.bind(
+            'icon-show-border',
+            showBorderRow,
+            'active',
+            Gio.SettingsBindFlags.DEFAULT
+        );
+        
+        bordersGroup.add(showBorderRow);
+
+        // Border color with color button
+        const borderColorRow = new Adw.ActionRow({
+            title: 'Border Color',
+            subtitle: 'Color for icon borders',
+        });
+        
+        const borderColorButton = new Gtk.Button({
+            valign: Gtk.Align.CENTER,
+            has_frame: true,
+            width_request: 40,
+            height_request: 40,
+        });
+        
+        const borderColorBox = new Gtk.Box({
+            width_request: 32,
+            height_request: 32,
+            css_classes: ['border-color-preview'],
+        });
+        borderColorButton.set_child(borderColorBox);
+        
+        const borderColorString = settings.get_string('icon-border-color');
+        const borderRgba = new Gdk.RGBA();
+        if (borderRgba.parse(borderColorString)) {
+            const borderCss = `
+                .border-color-preview {
+                    background-color: ${borderColorString};
+                    border-radius: 4px;
+                }
+            `;
+            const borderCssProvider = new Gtk.CssProvider();
+            borderCssProvider.load_from_data(borderCss, -1);
+            borderColorBox.get_style_context().add_provider(borderCssProvider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION);
+        }
+        
+        const borderColorChooser = new Gtk.ColorChooserDialog({
+            title: 'Choose Border Color',
+            modal: true,
+            use_alpha: true,
+        });
+        
+        if (borderRgba.parse(borderColorString)) {
+            borderColorChooser.set_rgba(borderRgba);
+        }
+        
+        borderColorButton.connect('clicked', () => {
+            borderColorChooser.set_transient_for(borderColorButton.get_root());
+            borderColorChooser.show();
+        });
+        
+        borderColorChooser.connect('response', (dialog, response) => {
+            if (response === Gtk.ResponseType.OK) {
+                const newColor = borderColorChooser.get_rgba();
+                const colorStr = newColor.to_string();
+                settings.set_string('icon-border-color', colorStr);
+                
+                const css = `
+                    .border-color-preview {
+                        background-color: ${colorStr};
+                        border-radius: 4px;
+                    }
+                `;
+                const cssProvider = new Gtk.CssProvider();
+                cssProvider.load_from_data(css, -1);
+                borderColorBox.get_style_context().add_provider(cssProvider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION);
+            }
+            dialog.hide();
+        });
+        
+        borderColorRow.add_suffix(borderColorButton);
+        borderColorRow.activatable_widget = borderColorButton;
+        bordersGroup.add(borderColorRow);
+        
+        // Bind border color row sensitivity to show border switch
+        showBorderRow.bind_property(
+            'active',
+            borderColorRow,
+            'sensitive',
+            GObject.BindingFlags.SYNC_CREATE
+        );
     }
 });
 

@@ -163,5 +163,17 @@
       <description>Multiplier for icon size (1-8, default 7 = 0.7)</description>
     </key>
     
+    <key name="icon-show-border" type="b">
+      <default>false</default>
+      <summary>Show icon border</summary>
+      <description>Show border around icon backgrounds</description>
+    </key>
+    
+    <key name="icon-border-color" type="s">
+      <default>"rgba(128,128,128,1.0)"</default>
+      <summary>Icon border color</summary>
+      <description>Color for icon borders</description>
+    </key>
+    
   </schema>
 </schemalist>
