@@ -7,6 +7,15 @@
 /* Obision Dash Container */
 .obision-dash-container {
     background-color: transparent;
+    height: 100% !important;
+}
+
+.obision-dash-container #dash {
+    height: 100% !important;
+}
+
+.obision-dash-container #dash > * {
+    height: 100% !important;
 }
 
 /* Obision TopBar Container */
@@ -33,10 +42,16 @@
 
 #dash .dash-item-container {
     padding: 0px;
+    margin: 0px;
 }
 
 #dash .dash-item-container > StWidget {
     padding: 0px;
+    margin: 0px;
+}
+
+/* Remove any gaps between icons */
+#dash .dash-item-container + .dash-item-container {
     margin: 0px;
 }
 
@@ -55,8 +70,13 @@
 #dash .show-apps {
     padding: 4px;
     transition-duration: 200ms;
-    height: 100%;
-    width: 100%;
+}
+
+.obision-dash-container #dash .app-well-app,
+.obision-dash-container #dash .show-apps {
+    height: 100% !important;
+    min-height: 100% !important;
+    max-height: 100% !important;
 }
 
 #dash .app-well-app:hover,
@@ -90,13 +110,19 @@
     border-radius: 4px;
 }
 
-/* Make icon containers fill available space */
+/* Make icon containers fill available space - force 100% height */
 .obision-dash-container #dash .dash-item-container {
-    height: 100%;
+    height: 100% !important;
+    box-sizing: border-box;
 }
 
 .obision-dash-container #dash .app-well-app,
 .obision-dash-container #dash .show-apps {
-    min-height: 100%;
-    min-width: 100%;
+    height: 100% !important;
+    box-sizing: border-box;
+}
+
+/* Ensure the box itself takes full height */
+.obision-dash-container #dash > StBoxLayout {
+    height: 100% !important;
 }

@@ -16,14 +16,14 @@
     </key>
     
     <key name="icon-spacing" type="i">
-      <default>8</default>
+      <default>0</default>
       <range min="0" max="32"/>
       <summary>Icon spacing</summary>
       <description>Space between icons in pixels</description>
     </key>
     
     <key name="panel-padding" type="i">
-      <default>8</default>
+      <default>0</default>
       <range min="0" max="32"/>
       <summary>Panel padding</summary>
       <description>Padding between panel edge and icons in pixels</description>

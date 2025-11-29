@@ -54,8 +54,8 @@ class PanelSettingsPage extends Adw.PreferencesPage {
 
         // Panel size
         const sizeRow = new Adw.SpinRow({
-            title: 'Panel Size',
-            subtitle: 'Width (for left/right) or height (for top/bottom) in pixels',
+            title: 'Panel Height',
+            subtitle: 'Height of the panel in pixels (width is always 100%)',
             adjustment: new Gtk.Adjustment({
                 lower: 40,
                 upper: 200,
@@ -142,6 +142,9 @@ class IconsSettingsPage extends Adw.PreferencesPage {
                 step_increment: 2,
             }),
         });
+        
+        // Set initial value from settings
+        iconSpacingRow.value = settings.get_int('icon-spacing');
         
         settings.bind(
             'icon-spacing',
