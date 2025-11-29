@@ -817,12 +817,22 @@ export default class ObisionExtensionDash extends Extension {
     }
 
     _updateDateFontSize() {
-        // Just update the format, don't call _updateDateFormat to avoid loops
-        if (this._customTimeLabel && this._customDateLabel) {
-            // Force an update by triggering the clock handler
-            if (this._dateMenu && this._dateMenu._clock) {
-                this._dateMenu._clock.notify('clock');
+        // Recreate the clock format when font settings change
+        if (this._customClockContainer && this._dateMenu) {
+            // Disconnect the old handler
+            if (this._clockNotifyId && this._dateMenu._clock) {
+                this._dateMenu._clock.disconnect(this._clockNotifyId);
+                this._clockNotifyId = null;
             }
+            
+            // Destroy and recreate the container
+            this._customClockContainer.destroy();
+            this._customClockContainer = null;
+            this._customTimeLabel = null;
+            this._customDateLabel = null;
+            
+            // Recreate with new settings
+            this._updateDateFormat();
         }
     }
 
@@ -939,15 +949,15 @@ export default class ObisionExtensionDash extends Extension {
             const month = String(now.getMonth() + 1).padStart(2, '0');
             const year = String(now.getFullYear());
             
-            const timeWeight = timeFontBold ? 'bold' : 'normal';
-            const dateWeight = dateFontBold ? 'bold' : 'normal';
+            const timeWeight = timeFontBold ? '700' : '400';
+            const dateWeight = dateFontBold ? '700' : '400';
             
             const timeText = `${hours}:${minutes}`;
             const dateText = dateShowYear ? `${day}/${month}/${year}` : `${day}/${month}`;
             
             // Update time label
             if (timeVisible) {
-                const timeMarkup = `<span font_size="${timeFontSize * 1024}" weight="${timeWeight}">${timeText}</span>`;
+                const timeMarkup = `<span font_size="${timeFontSize * 1024}" font_weight="${timeWeight}">${timeText}</span>`;
                 this._customTimeLabel.clutter_text.set_markup(timeMarkup);
                 this._customTimeLabel.show();
             } else {
@@ -956,7 +966,7 @@ export default class ObisionExtensionDash extends Extension {
             
             // Update date label
             if (dateVisible) {
-                const dateMarkup = `<span font_size="${dateFontSize * 1024}" weight="${dateWeight}">${dateText}</span>`;
+                const dateMarkup = `<span font_size="${dateFontSize * 1024}" font_weight="${dateWeight}">${dateText}</span>`;
                 this._customDateLabel.clutter_text.set_markup(dateMarkup);
                 this._customDateLabel.show();
             } else {

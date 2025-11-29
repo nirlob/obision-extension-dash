@@ -356,6 +356,16 @@ class SystemPanelSettingsPage extends Adw.PreferencesPage {
         timeFontBoldRow.set_activatable_widget(timeFontBoldSwitch);
         timeGroup.add(timeFontBoldRow);
 
+        // Bind time options sensitivity to time visibility
+        const updateTimeSensitivity = () => {
+            const visible = settings.get_boolean('time-visible');
+            timeFontSizeRow.sensitive = visible;
+            timeFontBoldRow.sensitive = visible;
+        };
+        
+        timeVisibleSwitch.connect('notify::active', updateTimeSensitivity);
+        updateTimeSensitivity();
+
         // Date group
         const dateGroup = new Adw.PreferencesGroup({
             title: 'Date',
@@ -448,6 +458,17 @@ class SystemPanelSettingsPage extends Adw.PreferencesPage {
         dateShowYearRow.add_suffix(dateShowYearSwitch);
         dateShowYearRow.set_activatable_widget(dateShowYearSwitch);
         dateGroup.add(dateShowYearRow);
+
+        // Bind date options sensitivity to date visibility
+        const updateDateSensitivity = () => {
+            const visible = settings.get_boolean('date-visible');
+            dateFontSizeRow.sensitive = visible;
+            dateFontBoldRow.sensitive = visible;
+            dateShowYearRow.sensitive = visible;
+        };
+        
+        dateVisibleSwitch.connect('notify::active', updateDateSensitivity);
+        updateDateSensitivity();
 
         // Icons group
         const iconsGroup = new Adw.PreferencesGroup({
