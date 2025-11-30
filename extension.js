@@ -1,6 +1,7 @@
 import { Extension } from 'resource:///org/gnome/shell/extensions/extension.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
+import * as AppFavorites from 'resource:///org/gnome/shell/ui/appFavorites.js';
 import St from 'gi://St';
 import Shell from 'gi://Shell';
 import Meta from 'gi://Meta';
@@ -18,7 +19,6 @@ export default class ObisionExtensionDash extends Extension {
         this._originalDashIndex = null;
         this._dash = null;
         this._panel = null;
-        this._dashContainer = null;
         this._topBarContainer = null;
         this._originalTopPanelParent = null;
         this._topPanel = null;
@@ -43,22 +43,64 @@ export default class ObisionExtensionDash extends Extension {
         this._customDateLabel = null;
         this._showAppsSeparator = null;
         this._iconStyleProvider = null;
+        this._overviewShowingId = null;
+        this._overviewHidingId = null;
+        this._dashBoxNotifyVisibleId = null;
+        this._dashBoxNotifyOpacityId = null;
+        this._visibilityCheckId = null;
+        this._startupCompleteId = null;
+        // New: our own app icons
+        this._appIconsBox = null;
+        this._appIcons = [];
+        this._appSystem = null;
+        this._favoritesChangedId = null;
+        this._appStateChangedId = null;
+        this._showAppsButton = null;
     }
 
     enable() {
-        log('Obision Extension Dash enabling');
+        log('Obision Extension Dash enabling - checking shell state');
         
         this._settings = this.getSettings();
         this._enableTimestamp = Date.now();
         
-        // Get the native dash from overview
+        // Check if shell is fully loaded, if not, wait
+        const overviewExists = Main.overview !== undefined && Main.overview !== null;
+        const dashExists = overviewExists && Main.overview.dash !== undefined && Main.overview.dash !== null;
+        
+        log(`Shell state: overview=${overviewExists}, dash=${dashExists}`);
+        
+        if (!overviewExists || !dashExists) {
+            log('Shell not fully loaded, waiting for startup-complete...');
+            this._startupCompleteId = Main.layoutManager.connect('startup-complete', () => {
+                log('Startup complete signal received, initializing extension');
+                Main.layoutManager.disconnect(this._startupCompleteId);
+                this._startupCompleteId = null;
+                this._initExtension();
+            });
+            return;
+        }
+        
+        log('Shell already loaded, initializing immediately');
+        this._initExtension();
+    }
+    
+    _initExtension() {
+        log('_initExtension called');
+        
+        // Get the native dash from overview (we'll hide it, not move it)
         this._dash = Main.overview.dash;
         
-        // Save original parent and position
-        this._originalDashParent = this._dash.get_parent();
-        if (this._originalDashParent) {
-            this._originalDashIndex = this._originalDashParent.get_children().indexOf(this._dash);
+        if (!this._dash) {
+            log('ERROR: Dash not available after init!');
+            return;
         }
+        
+        // Hide the original dash in overview instead of moving it
+        this._dash.hide();
+        
+        // Get app system for tracking running apps
+        this._appSystem = Shell.AppSystem.get_default();
         
         // Create main panel container
         this._panel = new St.BoxLayout({
@@ -73,24 +115,26 @@ export default class ObisionExtensionDash extends Extension {
         // Apply initial background style
         this._updatePanelBackground();
         
-        // Create dash container (will hold the dash icons)
-        this._dashContainer = new St.BoxLayout({
-            name: 'obision-dash-container',
+        // Create app icons box (expands to fill available space)
+        this._appIconsBox = new St.BoxLayout({
+            name: 'obision-app-icons',
             style_class: 'obision-dash-container',
+            vertical: false,
             x_expand: true,
-            y_expand: false,
+            y_expand: true,
             x_align: Clutter.ActorAlign.START,
-            y_align: Clutter.ActorAlign.START,
+            y_align: Clutter.ActorAlign.CENTER,
             clip_to_allocation: true,
         });
         
-        // Create top-bar container (will hold the top panel)
+        // Create top-bar container (shrinks to fit content)
         this._topBarContainer = new St.BoxLayout({
             name: 'obision-topbar-container',
             style_class: 'obision-topbar-container',
             x_expand: false,
             y_expand: false,
             x_align: Clutter.ActorAlign.END,
+            y_align: Clutter.ActorAlign.CENTER,
         });
         
         // Get and move the top panel
@@ -143,20 +187,8 @@ export default class ObisionExtensionDash extends Extension {
             this._topBarContainer.add_child(this._topPanel._rightBox);
         }
         
-        // Remove dash from overview
-        if (this._originalDashParent) {
-            this._originalDashParent.remove_child(this._dash);
-        }
-        
-        // Add dash to dash container
-        this._dashContainer.add_child(this._dash);
-        
-        // Prevent dash from centering - keep icons at start
-        this._dash._box.x_align = Clutter.ActorAlign.START;
-        this._dash._box.y_align = Clutter.ActorAlign.START;
-        
-        // Add containers to main panel
-        this._panel.add_child(this._dashContainer);
+        // Add containers to main panel: icons (expands) + topbar (shrinks to content)
+        this._panel.add_child(this._appIconsBox);
         this._panel.add_child(this._topBarContainer);
         
         // Create context menu
@@ -172,53 +204,19 @@ export default class ObisionExtensionDash extends Extension {
         this._updatePanelPosition();
         this._updatePanelPadding();
         
-        // Force dash to redisplay and be visible
-        if (this._dash._redisplay) {
-            this._dash._redisplay();
-        }
+        // Build our own app icons
+        this._buildAppIcons();
         
-        // Make dash always visible
-        this._dash.visible = true;
-        this._dash.opacity = 255;
-        this._dash.show();
-        
-        // Connect to dash visibility changes to force it visible
-        this._dashNotifyVisibleId = this._dash.connect('notify::visible', () => {
-            if (!this._dash.visible) {
-                this._dash.visible = true;
-                this._dash.show();
-            }
+        // Connect to favorites and app state changes
+        this._favoritesChangedId = AppFavorites.getAppFavorites().connect('changed', () => {
+            log('Favorites changed, rebuilding icons');
+            this._buildAppIcons();
         });
         
-        this._dashNotifyOpacityId = this._dash.connect('notify::opacity', () => {
-            if (this._dash.opacity !== 255) {
-                this._dash.opacity = 255;
-            }
+        this._appStateChangedId = this._appSystem.connect('app-state-changed', () => {
+            log('App state changed, rebuilding icons');
+            this._buildAppIcons();
         });
-        
-        // Monitor when items are added to ensure they stay visible and have correct height
-        if (this._dash._box) {
-            this._dashBoxChildAddedId = this._dash._box.connect('child-added', (box, child) => {
-                log('Child added to dash box, updating visibility and height');
-                this._dash.visible = true;
-                this._dash.show();
-                
-                // Force height on the newly added child
-                const padding = this._settings.get_int('panel-padding');
-                const containerHeight = this._panel.height - (padding * 2);
-                
-                child.natural_height = containerHeight;
-                child.min_height = containerHeight;
-                child.height = containerHeight;
-                
-                const button = child.first_child;
-                if (button) {
-                    button.natural_height = containerHeight;
-                    button.min_height = containerHeight;
-                    button.height = containerHeight;
-                }
-            });
-        }
         
         // Connect to monitor changes
         this._monitorsChangedId = Main.layoutManager.connect('monitors-changed', () => {
@@ -256,7 +254,7 @@ export default class ObisionExtensionDash extends Extension {
             this._settings.connect('changed::icon-corner-radius', () => this._updateIconStyling()),
             this._settings.connect('changed::icon-use-main-bg-color', () => this._updateIconStyling()),
             this._settings.connect('changed::icon-background-color', () => this._updateIconStyling()),
-            this._settings.connect('changed::icon-size-multiplier', () => this._updateIconStyling()),
+            // Icon size is now auto-calculated based on panel size
             this._settings.connect('changed::icon-normal-show-border', () => this._updateIconStyling()),
             this._settings.connect('changed::icon-normal-border-color', () => this._updateIconStyling()),
             this._settings.connect('changed::icon-hover-show-border', () => this._updateIconStyling()),
@@ -270,13 +268,8 @@ export default class ObisionExtensionDash extends Extension {
             this._updateActiveApp();
         });
         
-        // Apply all styles with delays to ensure panel is ready
+        // Apply styles with delays to ensure panel is ready
         GLib.timeout_add(GLib.PRIORITY_DEFAULT, 50, () => {
-            this._updateSystemIconStyling();
-            return GLib.SOURCE_REMOVE;
-        });
-        
-        GLib.timeout_add(GLib.PRIORITY_DEFAULT, 200, () => {
             this._updateSystemIconStyling();
             return GLib.SOURCE_REMOVE;
         });
@@ -284,13 +277,10 @@ export default class ObisionExtensionDash extends Extension {
         GLib.timeout_add(GLib.PRIORITY_DEFAULT, 500, () => {
             this._updateSystemIconStyling();
             this._updateDatePosition();
-            this._moveShowAppsToStart();
-            this._updateShowAppsSeparator();
             this._updateIconStyling();
             return GLib.SOURCE_REMOVE;
         });
         
-        // Apply icon styling again after a longer delay to ensure it overrides theme
         GLib.timeout_add(GLib.PRIORITY_DEFAULT, 1000, () => {
             this._updateIconStyling();
             return GLib.SOURCE_REMOVE;
@@ -310,6 +300,12 @@ export default class ObisionExtensionDash extends Extension {
 
     disable() {
         log('Obision Extension Dash disabling');
+        
+        // Cancel startup listener if still waiting
+        if (this._startupCompleteId) {
+            Main.layoutManager.disconnect(this._startupCompleteId);
+            this._startupCompleteId = null;
+        }
         
         // Remove keybinding
         Main.wm.removeKeybinding('toggle-dash');
@@ -350,21 +346,22 @@ export default class ObisionExtensionDash extends Extension {
             this._settingsChangedIds = null;
         }
         
-        // Disconnect dash visibility signals
-        if (this._dashNotifyVisibleId && this._dash) {
-            this._dash.disconnect(this._dashNotifyVisibleId);
-            this._dashNotifyVisibleId = null;
+        // Disconnect favorites and app state signals
+        if (this._favoritesChangedId) {
+            AppFavorites.getAppFavorites().disconnect(this._favoritesChangedId);
+            this._favoritesChangedId = null;
         }
         
-        if (this._dashNotifyOpacityId && this._dash) {
-            this._dash.disconnect(this._dashNotifyOpacityId);
-            this._dashNotifyOpacityId = null;
+        if (this._appStateChangedId && this._appSystem) {
+            this._appSystem.disconnect(this._appStateChangedId);
+            this._appStateChangedId = null;
         }
         
-        if (this._dashBoxChildAddedId && this._dash && this._dash._box) {
-            this._dash._box.disconnect(this._dashBoxChildAddedId);
-            this._dashBoxChildAddedId = null;
+        // Destroy our app icons
+        if (this._appIconsBox) {
+            this._appIconsBox.destroy_all_children();
         }
+        this._appIcons = [];
         
         // Disconnect menu signals
         if (this._panelButtonPressId && this._panel) {
@@ -400,9 +397,9 @@ export default class ObisionExtensionDash extends Extension {
             this._iconStyleProvider = null;
         }
         
-        // Restore dash to overview
-        if (this._dash && this._dashContainer) {
-            this._dashContainer.remove_child(this._dash);
+        // Show the original dash again
+        if (this._dash) {
+            this._dash.show();
         }
         
         // Restore top panel
@@ -461,9 +458,9 @@ export default class ObisionExtensionDash extends Extension {
             this._topBarContainer = null;
         }
         
-        if (this._dashContainer) {
-            this._dashContainer.destroy();
-            this._dashContainer = null;
+        if (this._appIconsBox) {
+            this._appIconsBox.destroy();
+            this._appIconsBox = null;
         }
         
         if (this._panel) {
@@ -472,23 +469,414 @@ export default class ObisionExtensionDash extends Extension {
             this._panel = null;
         }
         
-        // Put dash back in overview
-        if (this._dash && this._originalDashParent) {
-            if (this._originalDashIndex >= 0) {
-                this._originalDashParent.insert_child_at_index(this._dash, this._originalDashIndex);
-            } else {
-                this._originalDashParent.add_child(this._dash);
-            }
-        }
-        
         this._dash = null;
-        this._originalDashParent = null;
-        this._originalDashIndex = null;
         this._topPanel = null;
         this._originalTopPanelParent = null;
         this._settings = null;
+        this._appSystem = null;
+        this._appIconsBox = null;
         
         log('Obision Extension Dash disabled');
+    }
+
+    _buildAppIcons() {
+        log('_buildAppIcons called');
+        
+        if (!this._appIconsBox) {
+            log('ERROR: appIconsBox not available');
+            return;
+        }
+        
+        // Clear existing icons
+        this._appIconsBox.destroy_all_children();
+        this._appIcons = [];
+        
+        const padding = this._settings.get_int('panel-padding');
+        const dashSize = this._settings.get_int('dash-size');
+        const iconSpacing = this._settings.get_int('icon-spacing');
+        const containerHeight = dashSize - (padding * 2);
+        // Auto-calculate icon size: container minus padding for the icon button
+        const iconPadding = 8; // 4px padding on each side of icon
+        const iconSize = Math.floor(containerHeight - iconPadding);
+        
+        // Set spacing on the box
+        this._appIconsBox.set_style(`spacing: ${iconSpacing}px;`);
+        
+        // Create Show Apps button first
+        this._createShowAppsButton(containerHeight, iconSize);
+        
+        // Create separator
+        this._createSeparator(containerHeight);
+        
+        // Get favorites
+        const favorites = AppFavorites.getAppFavorites().getFavorites();
+        log(`Found ${favorites.length} favorites`);
+        
+        // Get running apps
+        const runningApps = this._appSystem.get_running();
+        
+        // Build combined app list (favorites first, then running non-favorites)
+        const appList = [...favorites];
+        for (const app of runningApps) {
+            if (!favorites.some(fav => fav.get_id() === app.get_id())) {
+                appList.push(app);
+            }
+        }
+        
+        log(`Total apps to show: ${appList.length}`);
+        
+        // Create icon for each app
+        for (const app of appList) {
+            const iconContainer = this._createAppIcon(app, containerHeight, iconSize);
+            if (iconContainer) {
+                this._appIconsBox.add_child(iconContainer);
+                this._appIcons.push(iconContainer);
+            }
+        }
+        
+        log(`Created ${this._appIcons.length} app icons`);
+    }
+    
+    _createShowAppsButton(containerHeight, iconSize) {
+        const button = new St.Button({
+            style_class: 'show-apps-button',
+            reactive: true,
+            can_focus: true,
+            track_hover: true,
+            width: containerHeight,
+            height: containerHeight,
+        });
+        
+        const icon = new St.Icon({
+            icon_name: 'view-app-grid-symbolic',
+            icon_size: iconSize,
+        });
+        
+        button.set_child(icon);
+        
+        button.connect('clicked', () => {
+            Main.overview.showApps();
+        });
+        
+        // Apply styling
+        this._applyIconContainerStyle(button, containerHeight);
+        
+        this._appIconsBox.add_child(button);
+        this._showAppsButton = button;
+    }
+    
+    _createSeparator(containerHeight) {
+        const showSeparator = this._settings.get_boolean('show-apps-separator');
+        if (!showSeparator) return;
+        
+        const separatorWidth = this._settings.get_int('separator-width');
+        const iconSpacing = this._settings.get_int('icon-spacing');
+        
+        // Use negative margin to cancel out the icon-spacing from the box
+        const separator = new St.Widget({
+            style: `background-color: rgba(128, 128, 128, 0.5); width: ${separatorWidth}px; height: ${containerHeight}px; margin: 0 -${iconSpacing / 2}px;`,
+            width: separatorWidth,
+            height: containerHeight,
+        });
+        
+        this._appIconsBox.add_child(separator);
+        this._showAppsSeparator = separator;
+    }
+    
+    _createAppIcon(app, containerHeight, iconSize) {
+        const container = new St.Button({
+            style_class: 'app-icon-container',
+            reactive: true,
+            can_focus: true,
+            track_hover: true,
+            width: containerHeight,
+            height: containerHeight,
+        });
+        
+        // Indicator height + spacing
+        const indicatorHeight = 3;
+        const indicatorSpacing = 1;
+        const indicatorTotal = indicatorHeight + indicatorSpacing;
+        
+        // Create vertical box - add top margin equal to indicator space minus 1px to shift up slightly
+        const contentBox = new St.BoxLayout({
+            vertical: true,
+            x_align: Clutter.ActorAlign.CENTER,
+            y_align: Clutter.ActorAlign.CENTER,
+            style: `spacing: ${indicatorSpacing}px; margin-top: ${indicatorTotal - 1}px;`,
+        });
+        
+        const icon = app.create_icon_texture(iconSize - 4);
+        if (!icon) {
+            log(`Could not create icon for ${app.get_id()}`);
+            return null;
+        }
+        
+        contentBox.add_child(icon);
+        
+        // Add running indicator dot
+        const isRunning = app.get_state() === Shell.AppState.RUNNING;
+        const indicator = new St.Widget({
+            style: `background-color: ${isRunning ? 'white' : 'transparent'}; border-radius: 1px;`,
+            width: 5,
+            height: indicatorHeight,
+            x_align: Clutter.ActorAlign.CENTER,
+        });
+        contentBox.add_child(indicator);
+        container._runningIndicator = indicator;
+        
+        container.set_child(contentBox);
+        container._app = app;
+        
+        // Click handler
+        container.connect('clicked', () => {
+            const windows = app.get_windows();
+            if (windows.length > 0) {
+                // Activate first window
+                const win = windows[0];
+                win.activate(global.get_current_time());
+            } else {
+                // Launch app
+                app.activate();
+            }
+        });
+        
+        // Enable drag for favorites reordering
+        const dominated = AppFavorites.getAppFavorites().getFavorites().some(f => f.get_id() === app.get_id());
+        if (dominated) {
+            container._draggable = true;
+            this._setupDragAndDrop(container, app);
+        }
+        
+        // Apply styling
+        this._applyIconContainerStyle(container, containerHeight);
+        
+        // Store app reference and running state
+        container._isRunning = isRunning;
+        
+        return container;
+    }
+    
+    _setupDragAndDrop(container, app) {
+        let dragStartX = 0;
+        let dragStartY = 0;
+        let isDragging = false;
+        let dragThreshold = 10;
+        
+        container.connect('button-press-event', (actor, event) => {
+            if (event.get_button() === 1) {
+                [dragStartX, dragStartY] = event.get_coords();
+                isDragging = false;
+            }
+            return Clutter.EVENT_PROPAGATE;
+        });
+        
+        container.connect('motion-event', (actor, event) => {
+            if (dragStartX === 0 && dragStartY === 0) return Clutter.EVENT_PROPAGATE;
+            
+            const [x, y] = event.get_coords();
+            const dx = Math.abs(x - dragStartX);
+            const dy = Math.abs(y - dragStartY);
+            
+            if (dx > dragThreshold || dy > dragThreshold) {
+                isDragging = true;
+                // Find drop target
+                const targetContainer = this._findDropTarget(x, y, container);
+                if (targetContainer && targetContainer !== container && targetContainer._app) {
+                    this._highlightDropTarget(targetContainer);
+                }
+            }
+            return Clutter.EVENT_PROPAGATE;
+        });
+        
+        container.connect('button-release-event', (actor, event) => {
+            if (isDragging && event.get_button() === 1) {
+                const [x, y] = event.get_coords();
+                const targetContainer = this._findDropTarget(x, y, container);
+                
+                if (targetContainer && targetContainer !== container && targetContainer._app) {
+                    // Reorder favorites
+                    const favorites = AppFavorites.getAppFavorites();
+                    const sourceId = app.get_id();
+                    const targetId = targetContainer._app.get_id();
+                    
+                    const favList = favorites.getFavorites().map(f => f.get_id());
+                    const sourceIdx = favList.indexOf(sourceId);
+                    const targetIdx = favList.indexOf(targetId);
+                    
+                    if (sourceIdx !== -1 && targetIdx !== -1) {
+                        favorites.moveFavoriteToPos(sourceId, targetIdx);
+                        log(`Moved ${sourceId} to position ${targetIdx}`);
+                    }
+                }
+                this._clearDropHighlight();
+            }
+            dragStartX = 0;
+            dragStartY = 0;
+            isDragging = false;
+            return Clutter.EVENT_PROPAGATE;
+        });
+    }
+    
+    _findDropTarget(x, y, excludeContainer) {
+        for (const iconContainer of this._appIcons) {
+            if (iconContainer === excludeContainer) continue;
+            if (!iconContainer._app) continue;
+            
+            const [success, ax, ay] = iconContainer.transform_stage_point(x, y);
+            if (success && ax >= 0 && ay >= 0 && ax <= iconContainer.width && ay <= iconContainer.height) {
+                return iconContainer;
+            }
+        }
+        return null;
+    }
+    
+    _highlightDropTarget(container) {
+        this._clearDropHighlight();
+        container._isDropTarget = true;
+        const currentStyle = container.get_style() || '';
+        container._preDropStyle = currentStyle;
+        container.set_style(currentStyle + ' box-shadow: 0 0 8px rgba(255,255,255,0.8);');
+    }
+    
+    _clearDropHighlight() {
+        for (const iconContainer of this._appIcons) {
+            if (iconContainer._isDropTarget) {
+                iconContainer.set_style(iconContainer._preDropStyle || '');
+                iconContainer._isDropTarget = false;
+            }
+        }
+    }
+    
+    _applyIconContainerStyle(container, containerHeight) {
+        const cornerRadius = this._settings.get_int('icon-corner-radius');
+        const useMainBgColor = this._settings.get_boolean('icon-use-main-bg-color');
+        const iconBgColor = this._settings.get_string('icon-background-color');
+        const mainBgColor = this._settings.get_string('background-color');
+        const normalShowBorder = this._settings.get_boolean('icon-normal-show-border');
+        const normalBorderColor = this._settings.get_string('icon-normal-border-color');
+        
+        const bgColor = useMainBgColor ? mainBgColor : iconBgColor;
+        const borderStyle = normalShowBorder ? `border: 2px solid ${normalBorderColor};` : '';
+        
+        container.set_style(`
+            background-color: ${bgColor};
+            border-radius: ${cornerRadius}px;
+            padding: 4px;
+            ${borderStyle}
+        `);
+        
+        // Store colors for hover effects
+        container._originalBgColor = bgColor;
+        container._cornerRadius = cornerRadius;
+        container._normalBorderStyle = borderStyle;
+        container._hoverProgress = 0;
+        container._animationId = null;
+        
+        const hoverBgColor = this._darkenColor(bgColor, 0.7);
+        const hoverShowBorder = this._settings.get_boolean('icon-hover-show-border');
+        const hoverBorderColor = this._settings.get_string('icon-hover-border-color');
+        const hoverBorderStyle = hoverShowBorder ? `border: 2px solid ${hoverBorderColor};` : '';
+        
+        container._hoverBgColor = hoverBgColor;
+        container._hoverBorderStyle = hoverBorderStyle;
+        
+        // Add smooth fade hover effect
+        container.connect('enter-event', () => {
+            container._isHovered = true;
+            this._animateHover(container, true);
+        });
+        
+        container.connect('leave-event', () => {
+            container._isHovered = false;
+            this._animateHover(container, false);
+        });
+    }
+    
+    _animateHover(container, entering) {
+        // Cancel any existing animation
+        if (container._animationId) {
+            GLib.source_remove(container._animationId);
+            container._animationId = null;
+        }
+        
+        const duration = 150; // ms
+        const steps = 10;
+        const stepTime = duration / steps;
+        
+        const animate = () => {
+            if (entering) {
+                container._hoverProgress = Math.min(1, container._hoverProgress + (1 / steps));
+            } else {
+                container._hoverProgress = Math.max(0, container._hoverProgress - (1 / steps));
+            }
+            
+            // Interpolate color
+            const currentColor = this._interpolateColor(
+                container._originalBgColor,
+                container._hoverBgColor,
+                container._hoverProgress
+            );
+            
+            // Use hover border when progress > 0.5, otherwise normal
+            const currentBorder = container._hoverProgress > 0.5 
+                ? container._hoverBorderStyle 
+                : container._normalBorderStyle;
+            
+            container.set_style(`
+                background-color: ${currentColor};
+                border-radius: ${container._cornerRadius}px;
+                padding: 4px;
+                ${currentBorder}
+            `);
+            
+            // Continue animation if not complete
+            if ((entering && container._hoverProgress < 1) || (!entering && container._hoverProgress > 0)) {
+                return GLib.SOURCE_CONTINUE;
+            }
+            
+            container._animationId = null;
+            return GLib.SOURCE_REMOVE;
+        };
+        
+        container._animationId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, stepTime, animate);
+    }
+    
+    _interpolateColor(color1Str, color2Str, progress) {
+        const parseRgba = (colorStr) => {
+            const match = colorStr.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?\)/);
+            if (match) {
+                return {
+                    r: parseInt(match[1]),
+                    g: parseInt(match[2]),
+                    b: parseInt(match[3]),
+                    a: match[4] ? parseFloat(match[4]) : 1
+                };
+            }
+            return { r: 128, g: 128, b: 128, a: 1 };
+        };
+        
+        const c1 = parseRgba(color1Str);
+        const c2 = parseRgba(color2Str);
+        
+        const r = Math.floor(c1.r + (c2.r - c1.r) * progress);
+        const g = Math.floor(c1.g + (c2.g - c1.g) * progress);
+        const b = Math.floor(c1.b + (c2.b - c1.b) * progress);
+        const a = c1.a + (c2.a - c1.a) * progress;
+        
+        return `rgba(${r}, ${g}, ${b}, ${a})`;
+    }
+    
+    _darkenColor(colorStr, factor) {
+        const match = colorStr.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?\)/);
+        if (match) {
+            const r = Math.floor(parseInt(match[1]) * factor);
+            const g = Math.floor(parseInt(match[2]) * factor);
+            const b = Math.floor(parseInt(match[3]) * factor);
+            const a = match[4] ? parseFloat(match[4]) : 1;
+            return `rgba(${r}, ${g}, ${b}, ${a})`;
+        }
+        return colorStr;
     }
 
     _updatePanelPosition() {
@@ -510,10 +898,8 @@ export default class ObisionExtensionDash extends Extension {
                 // Total height includes top panel + dash
                 this._panel.set_size(monitor.width, topPanelHeight + dashSize);
                 this._panel.vertical = false;
-                this._dashContainer.vertical = false;
+                this._appIconsBox.vertical = false;
                 this._topBarContainer.vertical = false;
-                if (this._dash._box) this._dash._box.vertical = false;
-                this._updateDashSize(monitor.width, dashSize);
                 break;
                 
             case 'BOTTOM':
@@ -524,10 +910,8 @@ export default class ObisionExtensionDash extends Extension {
                 // Total height includes top panel + dash
                 this._panel.set_size(monitor.width, topPanelHeight + dashSize);
                 this._panel.vertical = false;
-                this._dashContainer.vertical = false;
+                this._appIconsBox.vertical = false;
                 this._topBarContainer.vertical = false;
-                if (this._dash._box) this._dash._box.vertical = false;
-                this._updateDashSize(monitor.width, dashSize);
                 break;
                 
             case 'LEFT':
@@ -537,10 +921,8 @@ export default class ObisionExtensionDash extends Extension {
                 );
                 this._panel.set_size(dashSize, monitor.height);
                 this._panel.vertical = true;
-                this._dashContainer.vertical = true;
+                this._appIconsBox.vertical = true;
                 this._topBarContainer.vertical = true;
-                if (this._dash._box) this._dash._box.vertical = true;
-                this._updateDashSize(dashSize, monitor.height - topPanelHeight);
                 break;
                 
             case 'RIGHT':
@@ -550,95 +932,25 @@ export default class ObisionExtensionDash extends Extension {
                 );
                 this._panel.set_size(dashSize, monitor.height);
                 this._panel.vertical = true;
-                this._dashContainer.vertical = true;
+                this._appIconsBox.vertical = true;
                 this._topBarContainer.vertical = true;
-                if (this._dash._box) this._dash._box.vertical = true;
-                this._updateDashSize(dashSize, monitor.height - topPanelHeight);
                 break;
         }
-    }
-
-    _updateDashSize(width, height) {
-        if (!this._dash) return;
         
-        const padding = this._settings.get_int('panel-padding');
-        const iconSpacing = this._settings.get_int('icon-spacing');
-        
-        // Icon size should fill the available height/width minus padding
-        const availableSize = Math.min(width, height) - (padding * 2);
-        const containerHeight = height - (padding * 2);
-        
-        log(`_updateDashSize: width=${width}, height=${height}, padding=${padding}, iconSpacing=${iconSpacing}, containerHeight=${containerHeight}`);
-        
-        // Set icon size
-        this._dash.iconSize = availableSize;
-        
-        // Apply spacing between icons and force height
-        if (this._dash._box) {
-            const numChildren = this._dash._box.get_n_children();
-            log(`Dash box has ${numChildren} children`);
-            
-            // Set spacing on the box
-            this._dash._box.set_style(`spacing: ${iconSpacing}px; height: ${containerHeight}px;`);
-            
-            // Force height on all children
-            for (let i = 0; i < numChildren; i++) {
-                const child = this._dash._box.get_child_at_index(i);
-                if (!child) continue;
-                
-                log(`Setting height on child ${i}: ${containerHeight}px, child class: ${child.get_style_class_name()}`);
-                
-                // Use natural-height-set property
-                child.natural_height = containerHeight;
-                child.min_height = containerHeight;
-                child.height = containerHeight;
-                
-                // Get the first child (app button)
-                const button = child.first_child;
-                if (button) {
-                    log(`  Button found, setting height: ${containerHeight}px`);
-                    button.natural_height = containerHeight;
-                    button.min_height = containerHeight;
-                    button.height = containerHeight;
-                }
-            }
-        }
-        
-        // Reapply system icon styling after dash size changes
-        this._updateSystemIconStyling();
-        
-        // Update show apps button height
-        this._updateShowAppsButtonHeight();
-        
-        // Update separator height if it exists
-        this._updateShowAppsSeparator();
+        // Rebuild icons with new size
+        this._buildAppIcons();
     }
 
     _updateIconSpacing() {
-        if (!this._dash || !this._dash._box) return;
-        
-        const iconSpacing = this._settings.get_int('icon-spacing');
-        const padding = this._settings.get_int('panel-padding');
-        const dashSize = this._settings.get_int('dash-size');
-        const containerHeight = dashSize - (padding * 2);
-        
-        log(`_updateIconSpacing: ${iconSpacing}px, containerHeight: ${containerHeight}px`);
-        
-        // Set the layout's spacing property directly
-        if (this._dash._box.layout_manager) {
-            this._dash._box.layout_manager.spacing = iconSpacing;
-        }
-        
-        // Also set via style for compatibility
-        this._dash._box.set_style(`spacing: ${iconSpacing}px; height: ${containerHeight}px;`);
-        this._dash.queue_relayout();
+        // Just rebuild icons when spacing changes
+        this._buildAppIcons();
     }
 
     _updatePanelPadding() {
-        if (!this._dashContainer) return;
+        if (!this._appIconsBox) return;
         
         const padding = this._settings.get_int('panel-padding');
-        this._dashContainer.set_style(`padding: ${padding}px;`);
+        this._appIconsBox.set_style(`padding: ${padding}px;`);
         
         // Update dash size when padding changes
         this._updatePanelPosition();
@@ -1138,452 +1450,74 @@ export default class ObisionExtensionDash extends Extension {
     }
 
     _moveShowAppsToStart() {
-        if (!this._dash || !this._dash._showAppsIcon) {
-            log('Dash or showAppsIcon not available');
-            return;
-        }
-        
-        const showAppsIcon = this._dash._showAppsIcon;
-        const dashBox = this._dash._box;
-        
-        if (!dashBox) {
-            log('Dash box not available');
-            return;
-        }
-        
-        // Get current parent of showAppsIcon
-        const currentParent = showAppsIcon.get_parent();
-        if (!currentParent) {
-            log('ShowAppsIcon has no parent');
-            return;
-        }
-        
-        // Remove from current position
-        currentParent.remove_child(showAppsIcon);
-        
-        // Add at the beginning (index 0)
-        dashBox.insert_child_at_index(showAppsIcon, 0);
-        
-        // Remove any margin from the dash box itself to eliminate left spacing
-        if (this._dash._box) {
-            // The spacing property of BoxLayout creates gaps between children
-            // Set margin-left to negative to compensate for the spacing on first element
-            const iconSpacing = this._settings.get_int('icon-spacing');
-            this._dash._box.set_style(`spacing: ${iconSpacing}px; margin-left: 0px;`);
-        }
-        
-        // Also remove padding from dashContainer
-        if (this._dashContainer) {
-            const padding = this._settings.get_int('panel-padding');
-            this._dashContainer.set_style(`padding: 0px ${padding}px ${padding}px 0px;`);
-        }
-        
-        // Force 100% height on show apps button and its internal elements
-        this._updateShowAppsButtonHeight();
-        
-        log('Show Applications button moved to start');
-        
-        // Force a redisplay to update the layout
-        if (this._dash._redisplay) {
-            this._dash._redisplay();
-        }
+        // No longer needed - we create our own icons in _buildAppIcons
+        log('_moveShowAppsToStart: No longer needed with custom icons');
     }
 
     _updateShowAppsButtonHeight() {
-        if (!this._dash || !this._dash._showAppsIcon) {
-            return;
-        }
-        
-        const padding = this._settings.get_int('panel-padding');
-        const dashSize = this._settings.get_int('dash-size');
-        const containerHeight = dashSize - (padding * 2);
-        
-        const showAppsIcon = this._dash._showAppsIcon;
-        
-        // Function to recursively set height on all actors
-        const setHeightRecursive = (actor, depth = 0) => {
-            if (!actor) return;
-            
-            actor.natural_height = containerHeight;
-            actor.min_height = containerHeight;
-            actor.height = containerHeight;
-            
-            log(`${'  '.repeat(depth)}Setting height on: ${actor.constructor.name}`);
-            
-            // Also check for clutter actor children
-            if (actor.get_first_child) {
-                let child = actor.get_first_child();
-                while (child) {
-                    // Only set height on container elements, not on the icon itself
-                    if (child.constructor.name !== 'St_Icon') {
-                        setHeightRecursive(child, depth + 1);
-                    }
-                    child = child.get_next_sibling();
-                }
-            }
-        };
-        
-        setHeightRecursive(showAppsIcon);
-        
-        log(`Show Applications button height set to: ${containerHeight}px`);
+        // No longer needed - we handle this in _buildAppIcons
+        log('_updateShowAppsButtonHeight: No longer needed with custom icons');
     }
 
     _updateShowAppsSeparator() {
-        if (!this._dash || !this._dash._box) {
-            log('Dash or dash box not available');
-            return;
-        }
-        
-        const showSeparator = this._settings.get_boolean('show-apps-separator');
-        const dashBox = this._dash._box;
-        
-        // Remove existing separator if present
-        if (this._showAppsSeparator) {
-            if (this._showAppsSeparator.get_parent()) {
-                this._showAppsSeparator.get_parent().remove_child(this._showAppsSeparator);
-            }
-            this._showAppsSeparator.destroy();
-            this._showAppsSeparator = null;
-        }
-        
-        if (showSeparator) {
-            const position = this._settings.get_string('dash-position');
-            const separatorWidth = this._settings.get_int('separator-width');
-            const padding = this._settings.get_int('panel-padding');
-            const dashSize = this._settings.get_int('dash-size');
-            const containerHeight = dashSize - (padding * 2);
-            
-            if (position === 'TOP' || position === 'BOTTOM') {
-                // Horizontal panel: vertical separator
-                this._showAppsSeparator = new St.Widget({
-                    style_class: 'dash-separator',
-                    style: `background-color: rgba(0, 0, 0, 0.5); margin-left: 8px; margin-right: 8px;`,
-                });
-                
-                // Set explicit dimensions like dash children
-                this._showAppsSeparator.natural_width = separatorWidth;
-                this._showAppsSeparator.min_width = separatorWidth;
-                this._showAppsSeparator.width = separatorWidth;
-                this._showAppsSeparator.natural_height = containerHeight;
-                this._showAppsSeparator.min_height = containerHeight;
-                this._showAppsSeparator.height = containerHeight;
-            } else {
-                // Vertical panel: horizontal separator
-                this._showAppsSeparator = new St.Widget({
-                    style_class: 'dash-separator',
-                    style: `background-color: rgba(0, 0, 0, 0.5); margin-top: 8px; margin-bottom: 8px;`,
-                });
-                
-                // Set explicit dimensions like dash children
-                this._showAppsSeparator.natural_width = containerHeight;
-                this._showAppsSeparator.min_width = containerHeight;
-                this._showAppsSeparator.width = containerHeight;
-                this._showAppsSeparator.natural_height = separatorWidth;
-                this._showAppsSeparator.min_height = separatorWidth;
-                this._showAppsSeparator.height = separatorWidth;
-            }
-            
-            // Insert separator after the Show Applications button (at index 1)
-            dashBox.insert_child_at_index(this._showAppsSeparator, 1);
-            log('Show Applications separator added');
-        }
+        // Just rebuild icons to update separator
+        this._buildAppIcons();
     }
 
     _updateIconStyling() {
+        // Just rebuild icons with new styling
         log('_updateIconStyling called');
-        
-        if (!this._dash || !this._dash._box) {
-            log('Dash or dash box not available for icon styling');
-            return;
-        }
-        
-        log('Dash and box available, getting settings');
-        
-        const cornerRadius = this._settings.get_int('icon-corner-radius');
-        const useMainBgColor = this._settings.get_boolean('icon-use-main-bg-color');
-        const iconBgColor = this._settings.get_string('icon-background-color');
-        const mainBgColor = this._settings.get_string('background-color');
-        const normalShowBorder = this._settings.get_boolean('icon-normal-show-border');
-        const normalBorderColor = this._settings.get_string('icon-normal-border-color');
-        const hoverShowBorder = this._settings.get_boolean('icon-hover-show-border');
-        const hoverBorderColor = this._settings.get_string('icon-hover-border-color');
-        const selectedShowBorder = this._settings.get_boolean('icon-selected-show-border');
-        const selectedBorderColor = this._settings.get_string('icon-selected-border-color');
-        
-        // Determine which color to use
-        const bgColor = useMainBgColor ? mainBgColor : iconBgColor;
-        
-        // Get icon size multiplier (1-8, default 7 = 0.7)
-        const sizeMultiplier = this._settings.get_int('icon-size-multiplier');
-        const multiplier = sizeMultiplier / 10.0;
-        
-        // Calculate icon size based on multiplier
-        const iconSize = Math.floor(this._dash.iconSize * multiplier);
-        
-        log(`_updateIconStyling: cornerRadius=${cornerRadius}, useMainBgColor=${useMainBgColor}, bgColor=${bgColor}, normalShowBorder=${normalShowBorder}, normalBorderColor=${normalBorderColor}, hoverShowBorder=${hoverShowBorder}, hoverBorderColor=${hoverBorderColor}, selectedShowBorder=${selectedShowBorder}, selectedBorderColor=${selectedBorderColor}, sizeMultiplier=${sizeMultiplier}, multiplier=${multiplier}, iconSize=${iconSize}`);
-        
-        // Apply styles directly with inline styles (this is the only way to override theme styles)
-        const numChildren = this._dash._box.get_n_children();
-        log(`Applying icon styling to ${numChildren} children`);
-        
-        try {
-            for (let i = 0; i < numChildren; i++) {
-                const child = this._dash._box.get_child_at_index(i);
-                if (!child) {
-                    log(`Child ${i} is null, skipping`);
-                    continue;
-                }
-                
-                // Apply color, border radius, and border to the container
-                const normalBorderStyle = normalShowBorder ? `border: 2px solid ${normalBorderColor};` : '';
-                const hoverBorderStyle = hoverShowBorder ? `border: 2px solid ${hoverBorderColor};` : '';
-                const selectedBorderStyle = selectedShowBorder ? `border: 2px solid ${selectedBorderColor};` : '';
-                const containerStyle = `background-color: ${bgColor}; border-radius: ${cornerRadius}px; padding: 0px; ${normalBorderStyle}`;
-                child.set_style(containerStyle);
-                log(`Applied container style to child ${i}`);
-                
-                // Parse the background color and create a darker version for hover
-                const parseRgba = (colorStr) => {
-                    const match = colorStr.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?\)/);
-                    if (match) {
-                        return {
-                            r: parseInt(match[1]),
-                            g: parseInt(match[2]),
-                            b: parseInt(match[3]),
-                            a: match[4] ? parseFloat(match[4]) : 1
-                        };
-                    }
-                    return null;
-                };
-                
-                const darkenColor = (colorStr, factor = 0.7) => {
-                    const color = parseRgba(colorStr);
-                    if (color) {
-                        const r = Math.floor(color.r * factor);
-                        const g = Math.floor(color.g * factor);
-                        const b = Math.floor(color.b * factor);
-                        return `rgba(${r}, ${g}, ${b}, ${color.a})`;
-                    }
-                    return colorStr;
-                };
-                
-                const lightenColor = (colorStr, factor = 1.3) => {
-                    const color = parseRgba(colorStr);
-                    if (color) {
-                        const r = Math.min(255, Math.floor(color.r * factor));
-                        const g = Math.min(255, Math.floor(color.g * factor));
-                        const b = Math.min(255, Math.floor(color.b * factor));
-                        return `rgba(${r}, ${g}, ${b}, ${color.a})`;
-                    }
-                    return colorStr;
-                };
-                
-                // Store original colors and border settings
-                child._originalBgColor = bgColor;
-                child._hoverBgColor = darkenColor(bgColor, 0.7);
-                child._activeBgColor = lightenColor(bgColor, 1.3);
-                child._cornerRadius = cornerRadius;
-                child._normalBorderStyle = normalBorderStyle;
-                child._hoverBorderStyle = hoverBorderStyle;
-                child._selectedBorderStyle = selectedBorderStyle;
-                child._isHovered = false;
-                
-                log(`Original color: ${bgColor}, Hover color: ${child._hoverBgColor}, Active color: ${child._activeBgColor}`);
-                
-                // Store reference to update active state later
-                child._appButton = child.first_child;
-                
-                // Make the button and all its children transparent, and set icon size
-                const button = child.first_child;
-                if (button) {
-                    button.set_style('background-color: transparent; padding: 4px;');
-                    log(`Applied button style to child ${i}`);
-                    
-                    // Helper to interpolate between two RGBA colors
-                    const interpolateColor = (color1Str, color2Str, progress) => {
-                        const parseRgba = (colorStr) => {
-                            const match = colorStr.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?\)/);
-                            if (match) {
-                                return {
-                                    r: parseInt(match[1]),
-                                    g: parseInt(match[2]),
-                                    b: parseInt(match[3]),
-                                    a: match[4] ? parseFloat(match[4]) : 1
-                                };
-                            }
-                            return null;
-                        };
-                        
-                        const c1 = parseRgba(color1Str);
-                        const c2 = parseRgba(color2Str);
-                        
-                        if (c1 && c2) {
-                            const r = Math.floor(c1.r + (c2.r - c1.r) * progress);
-                            const g = Math.floor(c1.g + (c2.g - c1.g) * progress);
-                            const b = Math.floor(c1.b + (c2.b - c1.b) * progress);
-                            const a = c1.a + (c2.a - c1.a) * progress;
-                            return `rgba(${r}, ${g}, ${b}, ${a})`;
-                        }
-                        return color1Str;
-                    };
-                    
-                    // Add hover effect to button via enter/leave events with interpolation
-                    if (!button._hoverEnterSignalId) {
-                        button._hoverEnterSignalId = button.connect('enter-event', (actor) => {
-                            const parent = actor.get_parent();
-                            if (parent) {
-                                parent.remove_all_transitions();
-                                parent._isHovered = true;
-                                
-                                if (parent._animationId) {
-                                    GLib.source_remove(parent._animationId);
-                                    parent._animationId = null;
-                                }
-                                
-                                // Check if app is focused - if so, don't apply hover
-                                if (parent._isFocused) return;
-                                
-                                let step = 0;
-                                const steps = 10;
-                                const stepDuration = 20; // 200ms total
-                                
-                                const animate = () => {
-                                    if (!parent._isHovered || step >= steps) {
-                                        if (parent._isHovered) {
-                                            parent.set_style(`background-color: ${parent._hoverBgColor}; border-radius: ${parent._cornerRadius}px; padding: 0px; ${parent._hoverBorderStyle}`);
-                                        }
-                                        return GLib.SOURCE_REMOVE;
-                                    }
-                                    
-                                    step++;
-                                    const progress = step / steps;
-                                    const currentColor = interpolateColor(parent._originalBgColor, parent._hoverBgColor, progress);
-                                    parent.set_style(`background-color: ${currentColor}; border-radius: ${parent._cornerRadius}px; padding: 0px; ${parent._hoverBorderStyle}`);
-                                    return GLib.SOURCE_CONTINUE;
-                                };
-                                
-                                parent._animationId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, stepDuration, animate);
-                            }
-                        });
-                    }
-                    
-                    if (!button._hoverLeaveSignalId) {
-                        button._hoverLeaveSignalId = button.connect('leave-event', (actor) => {
-                            const parent = actor.get_parent();
-                            if (parent) {
-                                parent.remove_all_transitions();
-                                parent._isHovered = false;
-                                
-                                if (parent._animationId) {
-                                    GLib.source_remove(parent._animationId);
-                                    parent._animationId = null;
-                                }
-                                
-                                // Check if app is focused - return to active color instead of original
-                                const targetColor = parent._isFocused ? parent._activeBgColor : parent._originalBgColor;
-                                const targetBorderStyle = parent._isFocused ? parent._selectedBorderStyle : parent._normalBorderStyle;
-                                
-                                let step = 0;
-                                const steps = 10;
-                                const stepDuration = 20;
-                                
-                                const animate = () => {
-                                    if (parent._isHovered || step >= steps) {
-                                        if (!parent._isHovered) {
-                                            parent.set_style(`background-color: ${targetColor}; border-radius: ${parent._cornerRadius}px; padding: 0px; ${targetBorderStyle}`);
-                                        }
-                                        return GLib.SOURCE_REMOVE;
-                                    }
-                                    
-                                    step++;
-                                    const progress = 1 - (step / steps);
-                                    const currentColor = interpolateColor(targetColor, parent._hoverBgColor, progress);
-                                    parent.set_style(`background-color: ${currentColor}; border-radius: ${parent._cornerRadius}px; padding: 0px; ${targetBorderStyle}`);
-                                    return GLib.SOURCE_CONTINUE;
-                                };
-                                
-                                parent._animationId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, stepDuration, animate);
-                            }
-                        });
-                    }
-                    
-                    // Find and resize the actual icon recursively
-                    const findAndResizeIcon = (actor, depth = 0) => {
-                        if (!actor) return false;
-                        
-                        const actorName = actor.constructor ? actor.constructor.name : 'Unknown';
-                        log(`${'  '.repeat(depth)}Checking actor: ${actorName}`);
-                        
-                        if (actorName === 'St_Icon') {
-                            log(`${'  '.repeat(depth)}Found St_Icon, setting size to ${iconSize}px`);
-                            actor.set_icon_size(iconSize);
-                            actor.set_size(iconSize, iconSize);
-                            return true;
-                        }
-                        
-                        // Check if it has an icon property
-                        if (actor.icon && actor.icon.constructor && actor.icon.constructor.name === 'St_Icon') {
-                            log(`${'  '.repeat(depth)}Found icon property, setting size to ${iconSize}px`);
-                            actor.icon.set_icon_size(iconSize);
-                            actor.icon.set_size(iconSize, iconSize);
-                            return true;
-                        }
-                        
-                        // Recursively check children
-                        if (actor.get_first_child) {
-                            let childActor = actor.get_first_child();
-                            while (childActor) {
-                                if (findAndResizeIcon(childActor, depth + 1)) {
-                                    return true;
-                                }
-                                childActor = childActor.get_next_sibling();
-                            }
-                        }
-                        
-                        return false;
-                    };
-                    
-                    findAndResizeIcon(button);
-                }
-            }
-            log('Icon styling applied successfully');
-        } catch (e) {
-            log(`Error applying icon styling: ${e.message}`);
-        }
-        
-        // Reapply icon spacing after styling to ensure it's not overridden
-        this._updateIconSpacing();
-        
-        // Monitor focused window changes to update active state
-        this._updateActiveApp();
+        this._buildAppIcons();
     }
     
     _updateActiveApp() {
-        if (!this._dash || !this._dash._box) return;
+        if (!this._appIconsBox || !this._appIcons) return;
         
         const focusedWindow = global.display.get_focus_window();
         const focusedApp = focusedWindow ? Shell.WindowTracker.get_default().get_window_app(focusedWindow) : null;
         
-        log(`Focused app: ${focusedApp ? focusedApp.get_id() : 'none'}`);
-        
-        // Update all app buttons
-        const numChildren = this._dash._box.get_n_children();
-        for (let i = 0; i < numChildren; i++) {
-            const child = this._dash._box.get_child_at_index(i);
-            if (!child || !child._appButton) continue;
+        // Update all our custom app icons
+        for (const iconContainer of this._appIcons) {
+            if (!iconContainer._app) continue;
             
-            const appButton = child._appButton;
-            const app = appButton.app;
+            const app = iconContainer._app;
+            const isFocused = focusedApp && app.get_id() === focusedApp.get_id();
+            const isRunning = app.get_state() === Shell.AppState.RUNNING;
             
-            if (app && focusedApp && app.get_id() === focusedApp.get_id()) {
-                // This is the focused app - apply active color with selected border
-                child.set_style(`background-color: ${child._activeBgColor}; border-radius: ${child._cornerRadius}px; padding: 0px; ${child._selectedBorderStyle || ''}`);
-                child._isFocused = true;
-                log(`Set active style for app: ${app.get_id()}`);
-            } else if (child._isFocused && !child._isHovered) {
-                // Was focused, no longer - revert to normal with normal border
-                child.set_style(`background-color: ${child._originalBgColor}; border-radius: ${child._cornerRadius}px; padding: 0px; ${child._normalBorderStyle || ''}`);
-                child._isFocused = false;
+            // Update running indicator
+            if (iconContainer._runningIndicator) {
+                iconContainer._runningIndicator.set_style(
+                    `background-color: ${isRunning ? 'white' : 'transparent'}; border-radius: 1px;`
+                );
+            }
+            
+            if (isFocused && !iconContainer._isFocused) {
+                // App just got focus - apply active style
+                const selectedShowBorder = this._settings.get_boolean('icon-selected-show-border');
+                const selectedBorderColor = this._settings.get_string('icon-selected-border-color');
+                const selectedBorderStyle = selectedShowBorder ? `border: 2px solid ${selectedBorderColor};` : '';
+                const activeBgColor = this._darkenColor(iconContainer._originalBgColor, 1.3);
+                
+                iconContainer.set_style(`
+                    background-color: ${activeBgColor};
+                    border-radius: ${iconContainer._cornerRadius}px;
+                    padding: 4px;
+                    ${selectedBorderStyle}
+                `);
+                iconContainer._isFocused = true;
+            } else if (!isFocused && iconContainer._isFocused) {
+                // App lost focus - revert to normal style
+                const normalShowBorder = this._settings.get_boolean('icon-normal-show-border');
+                const normalBorderColor = this._settings.get_string('icon-normal-border-color');
+                const normalBorderStyle = normalShowBorder ? `border: 2px solid ${normalBorderColor};` : '';
+                
+                iconContainer.set_style(`
+                    background-color: ${iconContainer._originalBgColor};
+                    border-radius: ${iconContainer._cornerRadius}px;
+                    padding: 4px;
+                    ${normalBorderStyle}
+                `);
+                iconContainer._isFocused = false;
             }
         }
     }
