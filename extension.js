@@ -2,6 +2,7 @@ import { Extension } from 'resource:///org/gnome/shell/extensions/extension.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 import * as AppFavorites from 'resource:///org/gnome/shell/ui/appFavorites.js';
+import * as SystemActions from 'resource:///org/gnome/shell/misc/systemActions.js';
 import St from 'gi://St';
 import Shell from 'gi://Shell';
 import Meta from 'gi://Meta';
@@ -192,14 +193,42 @@ export default class ObisionExtensionDash extends Extension {
         this._panel.add_child(this._appIconsBox);
         this._panel.add_child(this._topBarContainer);
         
-        // Add right-click handler for dash context menu
-        this._appIconsBox.set_reactive(true);
-        this._appIconsBox.connect('button-press-event', (actor, event) => {
+        // Add right-click handler for dash context menu on the panel itself
+        this._panel.set_reactive(true);
+        this._panel.connect('button-press-event', (actor, event) => {
             if (event.get_button() === 3) { // Right click
-                // Only show dash menu if not clicking on an icon
                 const [x, y] = event.get_coords();
-                const iconAtPoint = this._getIconAtPoint(x, y);
-                if (!iconAtPoint) {
+                
+                // Check if click is on any icon
+                let clickedOnIcon = false;
+                for (const iconContainer of this._appIcons) {
+                    const [ix, iy] = iconContainer.get_transformed_position();
+                    const [iw, ih] = iconContainer.get_size();
+                    if (x >= ix && x <= ix + iw && y >= iy && y <= iy + ih) {
+                        clickedOnIcon = true;
+                        break;
+                    }
+                }
+                
+                // Check if click is on show apps button
+                if (this._showAppsButton && !clickedOnIcon) {
+                    const [sx, sy] = this._showAppsButton.get_transformed_position();
+                    const [sw, sh] = this._showAppsButton.get_size();
+                    if (x >= sx && x <= sx + sw && y >= sy && y <= sy + sh) {
+                        clickedOnIcon = true;
+                    }
+                }
+                
+                // Check if click is in the topbar area
+                if (this._topBarContainer && !clickedOnIcon) {
+                    const [tx, ty] = this._topBarContainer.get_transformed_position();
+                    const [tw, th] = this._topBarContainer.get_size();
+                    if (x >= tx && x <= tx + tw && y >= ty && y <= ty + th) {
+                        return Clutter.EVENT_PROPAGATE;
+                    }
+                }
+                
+                if (!clickedOnIcon) {
                     this._showDashContextMenu(actor, event);
                     return Clutter.EVENT_STOP;
                 }
@@ -800,41 +829,39 @@ export default class ObisionExtensionDash extends Extension {
         return null;
     }
     
-    _openMenuWithOverlay(menu, menuName) {
-        // Simple approach: just open menu and let it handle focus
-        menu.open();
+    _openMenuWithOverlay(menu, menuName, sourceActor) {
+        // Create a menu manager for this specific source actor
+        // This is how GNOME Shell menus work - the manager handles closing
+        const menuManager = new PopupMenu.PopupMenuManager(sourceActor);
+        menuManager.addMenu(menu);
         
-        // Use captured-event to detect clicks outside
-        this[`_${menuName}CaptureId`] = global.stage.connect('captured-event', (actor, event) => {
-            if (event.type() === Clutter.EventType.BUTTON_PRESS) {
-                const [x, y] = event.get_coords();
-                const menuActor = menu.actor;
-                if (menuActor) {
-                    const [mx, my] = menuActor.get_transformed_position();
-                    const [mw, mh] = menuActor.get_transformed_size();
-                    
-                    if (x < mx || x > mx + mw || y < my || y > my + mh) {
-                        menu.close();
-                        return Clutter.EVENT_STOP;
-                    }
-                }
-            }
-            return Clutter.EVENT_PROPAGATE;
-        });
+        // Open the menu
+        menu.open();
         
         // Cleanup when menu closes
         menu.connect('open-state-changed', (m, isOpen) => {
             if (!isOpen) {
-                // Disconnect capture
-                const captureId = this[`_${menuName}CaptureId`];
-                if (captureId) {
-                    global.stage.disconnect(captureId);
-                    this[`_${menuName}CaptureId`] = null;
-                }
-                
+                // Destroy menu after a small delay
                 GLib.idle_add(GLib.PRIORITY_DEFAULT, () => {
-                    if (this[`_${menuName}Menu`]) {
-                        this[`_${menuName}Menu`].destroy();
+                    // Clean up anchor if it exists (used for dash menu)
+                    if (menu._anchor) {
+                        try {
+                            Main.uiGroup.remove_child(menu._anchor);
+                            menu._anchor.destroy();
+                        } catch (e) {
+                            // Ignore
+                        }
+                        menu._anchor = null;
+                    }
+                    
+                    try {
+                        menu.destroy();
+                    } catch (e) {
+                        // Ignore
+                    }
+                    
+                    // Clear reference
+                    if (this[`_${menuName}Menu`] === menu) {
                         this[`_${menuName}Menu`] = null;
                     }
                     return GLib.SOURCE_REMOVE;
@@ -844,11 +871,15 @@ export default class ObisionExtensionDash extends Extension {
     }
     
     _showAppContextMenu(container, app, event) {
-        // Close any existing menu
+        // Close any existing menus (manager handles this, but be explicit)
         if (this._appContextMenu) {
             this._appContextMenu.close();
-            this._appContextMenu.destroy();
-            this._appContextMenu = null;
+        }
+        if (this._showAppsContextMenu) {
+            this._showAppsContextMenu.close();
+        }
+        if (this._dashContextMenu) {
+            this._dashContextMenu.close();
         }
         
         // Create popup menu
@@ -862,7 +893,7 @@ export default class ObisionExtensionDash extends Extension {
         
         // New Window
         if (appInfo && appInfo.supports_uris()) {
-            const newWindowItem = this._appContextMenu.addAction('Nueva ventana', () => {
+            const newWindowItem = this._appContextMenu.addAction('New Window', () => {
                 app.open_new_window(-1);
             });
         }
@@ -872,18 +903,18 @@ export default class ObisionExtensionDash extends Extension {
         
         // Add/Remove from favorites
         if (isFavorite) {
-            this._appContextMenu.addAction('Quitar de favoritos', () => {
+            this._appContextMenu.addAction('Remove from Favorites', () => {
                 AppFavorites.getAppFavorites().removeFavorite(app.get_id());
             });
         } else {
-            this._appContextMenu.addAction('Añadir a favoritos', () => {
+            this._appContextMenu.addAction('Add to Favorites', () => {
                 AppFavorites.getAppFavorites().addFavorite(app.get_id());
             });
         }
         
         // Show Details (open in Software Center)
         if (appInfo) {
-            this._appContextMenu.addAction('Mostrar detalles', () => {
+            this._appContextMenu.addAction('Show Details', () => {
                 const id = app.get_id();
                 const args = GLib.Variant.new('(ss)', [id, '']);
                 Gio.DBus.get(Gio.BusType.SESSION, null, (source, result) => {
@@ -913,7 +944,7 @@ export default class ObisionExtensionDash extends Extension {
             this._appContextMenu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
             
             // Quit
-            this._appContextMenu.addAction('Cerrar', () => {
+            this._appContextMenu.addAction('Quit', () => {
                 app.request_quit();
             });
         }
@@ -922,87 +953,176 @@ export default class ObisionExtensionDash extends Extension {
         this._appContextMenuMenu = this._appContextMenu;
         
         // Use overlay helper to close on any click outside
-        this._openMenuWithOverlay(this._appContextMenu, 'appContext');
+        this._openMenuWithOverlay(this._appContextMenu, 'appContext', container);
     }
 
     _showShowAppsContextMenu(button, event) {
-        // Close any existing menu
+        // Close any existing menus
+        if (this._appContextMenu) {
+            this._appContextMenu.close();
+        }
         if (this._showAppsContextMenu) {
             this._showAppsContextMenu.close();
-            this._showAppsContextMenu.destroy();
-            this._showAppsContextMenu = null;
-        }        // Create popup menu
+        }
+        if (this._dashContextMenu) {
+            this._dashContextMenu.close();
+        }
+        
+        // Create popup menu
         this._showAppsContextMenu = new PopupMenu.PopupMenu(button, 0.5, St.Side.BOTTOM);
         Main.uiGroup.add_child(this._showAppsContextMenu.actor);
         this._showAppsContextMenu.actor.add_style_class_name('app-menu');
         
-        // Dummy options
-        this._showAppsContextMenu.addAction('Mostrar todas las aplicaciones', () => {
+        // Overview options
+        this._showAppsContextMenu.addAction('Show All Applications', () => {
             Main.overview.showApps();
+        });
+        
+        this._showAppsContextMenu.addAction('Show Activities', () => {
+            Main.overview.show();
         });
         
         this._showAppsContextMenu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
         
-        this._showAppsContextMenu.addAction('Configuración', () => {
+        // Terminal
+        this._showAppsContextMenu.addAction('Open Terminal', () => {
+            const terminals = [
+                'org.gnome.Terminal.desktop',
+                'org.gnome.Console.desktop',
+                'gnome-terminal.desktop',
+                'konsole.desktop',
+                'xfce4-terminal.desktop',
+                'terminator.desktop'
+            ];
+            const appSystem = Shell.AppSystem.get_default();
+            for (const termId of terminals) {
+                const term = appSystem.lookup_app(termId);
+                if (term) {
+                    term.activate();
+                    return;
+                }
+            }
+        });
+        
+        // File Manager
+        this._showAppsContextMenu.addAction('Open Files', () => {
+            const fileManagers = [
+                'org.gnome.Nautilus.desktop',
+                'nautilus.desktop',
+                'org.gnome.Files.desktop',
+                'dolphin.desktop',
+                'thunar.desktop',
+                'nemo.desktop'
+            ];
+            const appSystem = Shell.AppSystem.get_default();
+            for (const fmId of fileManagers) {
+                const fm = appSystem.lookup_app(fmId);
+                if (fm) {
+                    fm.activate();
+                    return;
+                }
+            }
+        });
+        
+        this._showAppsContextMenu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
+        
+        // System options
+        this._showAppsContextMenu.addAction('Settings', () => {
             const settings = Shell.AppSystem.get_default().lookup_app('gnome-control-center.desktop');
             if (settings) {
                 settings.activate();
             }
         });
         
-        this._showAppsContextMenu.addAction('Estado del sistema', () => {
+        this._showAppsContextMenu.addAction('System Monitor', () => {
             const monitor = Shell.AppSystem.get_default().lookup_app('gnome-system-monitor.desktop');
             if (monitor) {
                 monitor.activate();
             }
+        });
+        
+        this._showAppsContextMenu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
+        
+        // Run dialog
+        this._showAppsContextMenu.addAction('Run Command...', () => {
+            Main.openRunDialog();
         });
         
         // Store menu reference for helper
         this._showAppsContextMenuMenu = this._showAppsContextMenu;
         
         // Use overlay helper to close on any click outside
-        this._openMenuWithOverlay(this._showAppsContextMenu, 'showAppsContext');
+        this._openMenuWithOverlay(this._showAppsContextMenu, 'showAppsContext', button);
     }
     
     _showDashContextMenu(actor, event) {
-        // Close any existing menu
+        // Close any existing menus
+        if (this._appContextMenu) {
+            this._appContextMenu.close();
+        }
+        if (this._showAppsContextMenu) {
+            this._showAppsContextMenu.close();
+        }
         if (this._dashContextMenu) {
             this._dashContextMenu.close();
-            this._dashContextMenu.destroy();
-            this._dashContextMenu = null;
         }
         
-        // Create popup menu
-        this._dashContextMenu = new PopupMenu.PopupMenu(actor, 0.5, St.Side.BOTTOM);
+        // Get mouse position
+        const [mouseX, mouseY] = event.get_coords();
+        
+        // Create a temporary anchor actor at mouse position
+        const anchor = new St.Widget({
+            x: mouseX,
+            y: mouseY,
+            width: 1,
+            height: 1,
+        });
+        Main.uiGroup.add_child(anchor);
+        
+        // Create popup menu at mouse position, opening upwards (TOP side)
+        this._dashContextMenu = new PopupMenu.PopupMenu(anchor, 0.0, St.Side.TOP);
         Main.uiGroup.add_child(this._dashContextMenu.actor);
         this._dashContextMenu.actor.add_style_class_name('app-menu');
         
+        // Store anchor for cleanup
+        this._dashContextMenu._anchor = anchor;
+        
         // Dash options
-        this._dashContextMenu.addAction('Preferencias del dash', () => {
-            this._extension.openPreferences();
+        this._dashContextMenu.addAction('Dash Preferences', () => {
+            this.openPreferences();
         });
         
         this._dashContextMenu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
         
-        this._dashContextMenu.addAction('Configuración del sistema', () => {
-            const settings = Shell.AppSystem.get_default().lookup_app('gnome-control-center.desktop');
-            if (settings) {
-                settings.activate();
-            }
+        // Session options submenu
+        const sessionSubMenu = new PopupMenu.PopupSubMenuMenuItem('Session');
+        this._dashContextMenu.addMenuItem(sessionSubMenu);
+        
+        sessionSubMenu.menu.addAction('Lock Screen', () => {
+            Main.screenShield.lock(true);
         });
         
-        this._dashContextMenu.addAction('Estado del sistema', () => {
-            const monitor = Shell.AppSystem.get_default().lookup_app('gnome-system-monitor.desktop');
-            if (monitor) {
-                monitor.activate();
-            }
+        sessionSubMenu.menu.addAction('Log Out...', () => {
+            SystemActions.getDefault().activateLogout();
+        });
+        
+        sessionSubMenu.menu.addAction('Suspend', () => {
+            SystemActions.getDefault().activateSuspend();
+        });
+        
+        sessionSubMenu.menu.addAction('Restart...', () => {
+            SystemActions.getDefault().activateRestart();
+        });
+        
+        sessionSubMenu.menu.addAction('Power Off...', () => {
+            SystemActions.getDefault().activatePowerOff();
         });
         
         // Store menu reference for helper
         this._dashContextMenuMenu = this._dashContextMenu;
         
         // Use overlay helper to close on any click outside
-        this._openMenuWithOverlay(this._dashContextMenu, 'dashContext');
+        this._openMenuWithOverlay(this._dashContextMenu, 'dashContext', anchor);
     }
     
     _showDateTimeContextMenu(actor, event) {
@@ -1077,35 +1197,62 @@ export default class ObisionExtensionDash extends Extension {
     }
     
     _updateFocusedApp() {
-        // Close any open menus when focus changes
-        this._closeAllContextMenus();
-        
         // Use WindowTracker.focus_app which is more reliable
         const tracker = Shell.WindowTracker.get_default();
         const focusedApp = tracker.focus_app;
-        
-        log(`Focus changed: ${focusedApp ? focusedApp.get_id() : 'none'}`);
         
         for (const container of this._appIcons) {
             if (!container._app) continue;
             
             const isFocused = focusedApp && container._app.get_id() === focusedApp.get_id();
+            const isRunning = container._app.get_state() === Shell.AppState.RUNNING;
             
-            if (isFocused) {
-                // Add focus highlight
+            if (isFocused && !container._isFocused) {
+                // App just got focus - apply focused style
                 container._isFocused = true;
+                
+                // Change running indicator to blue and wider
                 if (container._runningIndicator) {
                     container._runningIndicator.set_style('background-color: #3584e4; border-radius: 2px;');
                     container._runningIndicator.set_width(14);
                 }
-            } else {
-                // Remove focus highlight
+                
+                // Apply focused background style - use a visible blue tint
+                const selectedShowBorder = this._settings.get_boolean('icon-selected-show-border');
+                const selectedBorderColor = this._settings.get_string('icon-selected-border-color');
+                const selectedBorderStyle = selectedShowBorder ? `border: 2px solid ${selectedBorderColor};` : '';
+                
+                // Use a semi-transparent blue overlay for visibility
+                container.set_style(`
+                    background-color: rgba(53, 132, 228, 0.3);
+                    border-radius: ${container._cornerRadius}px;
+                    padding: 4px;
+                    ${container._marginStyle || ''}
+                    ${selectedBorderStyle}
+                `);
+                
+            } else if (!isFocused && container._isFocused) {
+                // App lost focus - revert to normal style
                 container._isFocused = false;
+                
+                // Revert running indicator
                 if (container._runningIndicator) {
-                    const isRunning = container._app.get_state() === Shell.AppState.RUNNING;
                     container._runningIndicator.set_style(`background-color: ${isRunning ? 'white' : 'transparent'}; border-radius: 1px;`);
                     container._runningIndicator.set_width(5);
                 }
+                
+                // Revert to normal background style
+                const normalShowBorder = this._settings.get_boolean('icon-normal-show-border');
+                const normalBorderColor = this._settings.get_string('icon-normal-border-color');
+                const normalBorderStyle = normalShowBorder ? `border: 2px solid ${normalBorderColor};` : '';
+                
+                container.set_style(`
+                    background-color: ${container._originalBgColor};
+                    border-radius: ${container._cornerRadius}px;
+                    padding: 4px;
+                    ${container._marginStyle || ''}
+                    ${normalBorderStyle}
+                `);
             }
         }
     }
@@ -1187,11 +1334,22 @@ export default class ObisionExtensionDash extends Extension {
             container._animationId = null;
         }
         
+        // If container is focused, don't animate at all - keep focused style
+        if (container._isFocused) {
+            return;
+        }
+        
         const duration = 150; // ms
         const steps = 10;
         const stepTime = duration / steps;
         
         const animate = () => {
+            // Check again in case focus changed during animation
+            if (container._isFocused) {
+                container._animationId = null;
+                return GLib.SOURCE_REMOVE;
+            }
+            
             if (entering) {
                 container._hoverProgress = Math.min(1, container._hoverProgress + (1 / steps));
             } else {
@@ -1863,57 +2021,5 @@ export default class ObisionExtensionDash extends Extension {
         // Just rebuild icons with new styling
         log('_updateIconStyling called');
         this._buildAppIcons();
-    }
-    
-    _updateActiveApp() {
-        if (!this._appIconsBox || !this._appIcons) return;
-        
-        const focusedWindow = global.display.get_focus_window();
-        const focusedApp = focusedWindow ? Shell.WindowTracker.get_default().get_window_app(focusedWindow) : null;
-        
-        // Update all our custom app icons
-        for (const iconContainer of this._appIcons) {
-            if (!iconContainer._app) continue;
-            
-            const app = iconContainer._app;
-            const isFocused = focusedApp && app.get_id() === focusedApp.get_id();
-            const isRunning = app.get_state() === Shell.AppState.RUNNING;
-            
-            // Update running indicator
-            if (iconContainer._runningIndicator) {
-                iconContainer._runningIndicator.set_style(
-                    `background-color: ${isRunning ? 'white' : 'transparent'}; border-radius: 1px;`
-                );
-            }
-            
-            if (isFocused && !iconContainer._isFocused) {
-                // App just got focus - apply active style
-                const selectedShowBorder = this._settings.get_boolean('icon-selected-show-border');
-                const selectedBorderColor = this._settings.get_string('icon-selected-border-color');
-                const selectedBorderStyle = selectedShowBorder ? `border: 2px solid ${selectedBorderColor};` : '';
-                const activeBgColor = this._darkenColor(iconContainer._originalBgColor, 1.3);
-                
-                iconContainer.set_style(`
-                    background-color: ${activeBgColor};
-                    border-radius: ${iconContainer._cornerRadius}px;
-                    padding: 4px;
-                    ${selectedBorderStyle}
-                `);
-                iconContainer._isFocused = true;
-            } else if (!isFocused && iconContainer._isFocused) {
-                // App lost focus - revert to normal style
-                const normalShowBorder = this._settings.get_boolean('icon-normal-show-border');
-                const normalBorderColor = this._settings.get_string('icon-normal-border-color');
-                const normalBorderStyle = normalShowBorder ? `border: 2px solid ${normalBorderColor};` : '';
-                
-                iconContainer.set_style(`
-                    background-color: ${iconContainer._originalBgColor};
-                    border-radius: ${iconContainer._cornerRadius}px;
-                    padding: 4px;
-                    ${normalBorderStyle}
-                `);
-                iconContainer._isFocused = false;
-            }
-        }
     }
 }
