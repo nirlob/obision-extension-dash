@@ -136,13 +136,32 @@ export default class ObisionExtensionDash extends Extension {
             can_focus: true,
             track_hover: true,
             visible: false,
+            x_expand: false,
+            y_expand: false,
         });
         this._scrollPrevIcon = new St.Icon({
             icon_name: 'pan-start-symbolic',
-            icon_size: 16,
+            icon_size: 12,
         });
         this._scrollPrevButton.set_child(this._scrollPrevIcon);
-        this._scrollPrevButton.connect('clicked', () => this._scrollIcons(-1));
+        // Use button-press-event to ensure we capture the click
+        this._scrollPrevButton.connect('button-press-event', (actor, event) => {
+            if (event.get_button() === 1) {
+                this._scrollIcons(-1);
+                return Clutter.EVENT_STOP;
+            }
+            return Clutter.EVENT_PROPAGATE;
+        });
+        this._scrollPrevButton.connect('enter-event', () => {
+            if (this._scrollPrevButton._hoverStyle) {
+                this._scrollPrevButton.set_style(this._scrollPrevButton._hoverStyle);
+            }
+        });
+        this._scrollPrevButton.connect('leave-event', () => {
+            if (this._scrollPrevButton._normalStyle) {
+                this._scrollPrevButton.set_style(this._scrollPrevButton._normalStyle);
+            }
+        });
 
         // Create ScrollView for icons
         this._scrollView = new St.ScrollView({
@@ -182,18 +201,47 @@ export default class ObisionExtensionDash extends Extension {
             can_focus: true,
             track_hover: true,
             visible: false,
+            x_expand: false,
+            y_expand: false,
         });
         this._scrollNextIcon = new St.Icon({
             icon_name: 'pan-end-symbolic',
-            icon_size: 16,
+            icon_size: 12,
         });
         this._scrollNextButton.set_child(this._scrollNextIcon);
-        this._scrollNextButton.connect('clicked', () => this._scrollIcons(1));
+        // Use button-press-event to ensure we capture the click
+        this._scrollNextButton.connect('button-press-event', (actor, event) => {
+            if (event.get_button() === 1) {
+                this._scrollIcons(1);
+                return Clutter.EVENT_STOP;
+            }
+            return Clutter.EVENT_PROPAGATE;
+        });
+        this._scrollNextButton.connect('enter-event', () => {
+            if (this._scrollNextButton._hoverStyle) {
+                this._scrollNextButton.set_style(this._scrollNextButton._hoverStyle);
+            }
+        });
+        this._scrollNextButton.connect('leave-event', () => {
+            if (this._scrollNextButton._normalStyle) {
+                this._scrollNextButton.set_style(this._scrollNextButton._normalStyle);
+            }
+        });
 
         // Add scroll buttons and scroll view to container
         this._scrollContainer.add_child(this._scrollPrevButton);
         this._scrollContainer.add_child(this._scrollView);
         this._scrollContainer.add_child(this._scrollNextButton);
+
+        // Create container for Show Apps button (outside scroll)
+        this._showAppsContainer = new St.BoxLayout({
+            name: 'obision-show-apps-container',
+            vertical: false,
+            x_expand: false,
+            y_expand: false,
+            x_align: Clutter.ActorAlign.START,
+            y_align: Clutter.ActorAlign.CENTER,
+        });
 
         // Create top-bar container (shrinks to fit content)
         this._topBarContainer = new St.BoxLayout({
@@ -255,7 +303,8 @@ export default class ObisionExtensionDash extends Extension {
             this._topBarContainer.add_child(this._topPanel._rightBox);
         }
 
-        // Add containers to main panel: scroll container (expands) + topbar (shrinks to content)
+        // Add containers to main panel: show apps + scroll container (expands) + topbar (shrinks to content)
+        this._panel.add_child(this._showAppsContainer);
         this._panel.add_child(this._scrollContainer);
         this._panel.add_child(this._topBarContainer);
 
@@ -630,6 +679,11 @@ export default class ObisionExtensionDash extends Extension {
             this._topBarContainer = null;
         }
 
+        if (this._showAppsContainer) {
+            this._showAppsContainer.destroy();
+            this._showAppsContainer = null;
+        }
+
         if (this._scrollContainer) {
             this._scrollContainer.destroy();
             this._scrollContainer = null;
@@ -692,13 +746,22 @@ export default class ObisionExtensionDash extends Extension {
         const position = this._settings.get_string('dash-position');
         const isVertical = (position === 'LEFT' || position === 'RIGHT');
 
-        // Set padding on the box via style
-        this._appIconsBox.set_style(`padding: ${padding}px;`);
+        // Set padding on the show apps container and scroll container
+        // Show apps container gets full padding, scroll container gets padding except on the side adjacent to show apps
+        this._showAppsContainer.set_style(`padding: ${padding}px;`);
+        if (isVertical) {
+            // Vertical: show apps is at top, so scroll container has no padding-top
+            this._scrollContainer.set_style(`padding: ${padding}px; padding-top: 0px;`);
+        } else {
+            // Horizontal: show apps is at left, so scroll container has no padding-left
+            this._scrollContainer.set_style(`padding: ${padding}px; padding-left: 0px;`);
+        }
+        this._appIconsBox.set_style('padding: 0px;');
 
-        // Create Show Apps button first
+        // Create Show Apps button in its own container (outside scroll)
         this._createShowAppsButton(containerSize, iconSize, isVertical);
 
-        // Create separator after show apps button
+        // Create separator after show apps button (inside scroll)
         this._createSeparator(containerSize, isVertical, 'apps');
 
         // Get favorites
@@ -799,7 +862,9 @@ export default class ObisionExtensionDash extends Extension {
         // Apply styling (false = not app icon, false = not first icon, isVertical)
         this._applyIconContainerStyle(button, containerSize, false, false, isVertical);
 
-        this._appIconsBox.add_child(button);
+        // Clear and add to show apps container (outside scroll)
+        this._showAppsContainer.destroy_all_children();
+        this._showAppsContainer.add_child(button);
         this._showAppsButton = button;
     }
 
@@ -1287,6 +1352,13 @@ export default class ObisionExtensionDash extends Extension {
             Main.openRunDialog();
         });
 
+        this._showAppsContextMenu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
+
+        // Dash Preferences
+        this._showAppsContextMenu.addAction('Dash Preferences', () => {
+            this._openOrFocusPreferences();
+        });
+
         // Store menu reference for helper
         this._showAppsContextMenuMenu = this._showAppsContextMenu;
 
@@ -1731,7 +1803,10 @@ export default class ObisionExtensionDash extends Extension {
                 // Total height includes top panel + dash
                 this._panel.set_size(monitor.width, topPanelHeight + dashSize);
                 this._panel.vertical = false;
+                this._showAppsContainer.vertical = false;
                 this._scrollContainer.vertical = false;
+                this._scrollContainer.x_align = Clutter.ActorAlign.START;
+                this._scrollContainer.y_align = Clutter.ActorAlign.CENTER;
                 this._appIconsBox.vertical = false;
                 this._appIconsBox.x_align = Clutter.ActorAlign.START;
                 this._appIconsBox.y_align = Clutter.ActorAlign.CENTER;
@@ -1750,7 +1825,10 @@ export default class ObisionExtensionDash extends Extension {
                 // Total height includes top panel + dash
                 this._panel.set_size(monitor.width, topPanelHeight + dashSize);
                 this._panel.vertical = false;
+                this._showAppsContainer.vertical = false;
                 this._scrollContainer.vertical = false;
+                this._scrollContainer.x_align = Clutter.ActorAlign.START;
+                this._scrollContainer.y_align = Clutter.ActorAlign.CENTER;
                 this._appIconsBox.vertical = false;
                 this._appIconsBox.x_align = Clutter.ActorAlign.START;
                 this._appIconsBox.y_align = Clutter.ActorAlign.CENTER;
@@ -1768,7 +1846,10 @@ export default class ObisionExtensionDash extends Extension {
                 );
                 this._panel.set_size(dashSize, monitor.height);
                 this._panel.vertical = true;
+                this._showAppsContainer.vertical = true;
                 this._scrollContainer.vertical = true;
+                this._scrollContainer.x_align = Clutter.ActorAlign.CENTER;
+                this._scrollContainer.y_align = Clutter.ActorAlign.START;
                 this._appIconsBox.vertical = true;
                 this._appIconsBox.x_align = Clutter.ActorAlign.CENTER;
                 this._appIconsBox.y_align = Clutter.ActorAlign.START;
@@ -1786,7 +1867,10 @@ export default class ObisionExtensionDash extends Extension {
                 );
                 this._panel.set_size(dashSize, monitor.height);
                 this._panel.vertical = true;
+                this._showAppsContainer.vertical = true;
                 this._scrollContainer.vertical = true;
+                this._scrollContainer.x_align = Clutter.ActorAlign.CENTER;
+                this._scrollContainer.y_align = Clutter.ActorAlign.START;
                 this._appIconsBox.vertical = true;
                 this._appIconsBox.x_align = Clutter.ActorAlign.CENTER;
                 this._appIconsBox.y_align = Clutter.ActorAlign.START;
@@ -1813,19 +1897,64 @@ export default class ObisionExtensionDash extends Extension {
             ? this._scrollView.get_vadjustment()
             : this._scrollView.get_hadjustment();
 
-        if (!adjustment) return;
+        if (!adjustment) {
+            log('_scrollIcons: No adjustment available');
+            return;
+        }
 
-        const scrollAmount = 100; // pixels to scroll per click
+        // Calculate scroll amount based on icon size
+        const dashSize = this._settings.get_int('dash-size');
+        const padding = this._settings.get_int('panel-padding');
+        const iconSpacing = this._settings.get_int('icon-spacing');
+        const containerSize = dashSize - (padding * 2);
+        // Scroll by one icon + spacing
+        const scrollAmount = containerSize + iconSpacing;
+
+        const maxScroll = Math.max(0, adjustment.upper - adjustment.page_size);
+
+        // If there's nothing to scroll, hide both buttons and return
+        if (maxScroll <= 0) {
+            this._scrollPrevButton.visible = false;
+            this._scrollNextButton.visible = false;
+            return;
+        }
+
         const newValue = adjustment.value + (direction * scrollAmount);
 
         // Clamp to valid range
-        const clampedValue = Math.max(0, Math.min(newValue, adjustment.upper - adjustment.page_size));
+        const clampedValue = Math.max(0, Math.min(newValue, maxScroll));
+
+        log(`_scrollIcons: direction=${direction}, value=${adjustment.value}, maxScroll=${maxScroll}, clampedValue=${clampedValue}`);
+
+        // Use tolerance of 10px for detecting start/end
+        const tolerance = 10;
+
+        // Update button visibility BEFORE scrolling
+        // When scrolling down/right (direction > 0), show prev button
+        // When scrolling up/left (direction < 0), show next button
+        if (direction > 0) {
+            // Scrolling down/right - prev button should be visible after scroll
+            this._scrollPrevButton.visible = true;
+            // Hide next button if we'll reach the end
+            if (clampedValue >= maxScroll - tolerance) {
+                this._scrollNextButton.visible = false;
+            }
+        } else {
+            // Scrolling up/left - next button should be visible after scroll
+            this._scrollNextButton.visible = true;
+            // Hide prev button if we'll reach the start
+            if (clampedValue < tolerance) {
+                this._scrollPrevButton.visible = false;
+            }
+        }
 
         // Animate the scroll
         adjustment.ease(clampedValue, {
             duration: 200,
             mode: Clutter.AnimationMode.EASE_OUT_QUAD,
-            onComplete: () => this._updateScrollButtonsVisibility(),
+            onComplete: () => {
+                this._updateScrollButtonsVisibility();
+            },
         });
     }
 
@@ -1840,39 +1969,71 @@ export default class ObisionExtensionDash extends Extension {
             ? this._scrollView.get_vadjustment()
             : this._scrollView.get_hadjustment();
 
-        // Get actual content size vs visible area
-        const contentSize = isVertical ? this._appIconsBox.height : this._appIconsBox.width;
-        const viewSize = isVertical ? this._scrollView.height : this._scrollView.width;
-
-        const hasOverflow = contentSize > viewSize;
-        let atStart = true;
-        let atEnd = true;
-
-        if (adjustment) {
-            atStart = adjustment.value <= 1;
-            atEnd = adjustment.value >= (adjustment.upper - adjustment.page_size - 1);
+        if (!adjustment) {
+            log('No adjustment available');
+            return;
         }
 
-        log(`Scroll check: contentSize=${contentSize}, viewSize=${viewSize}, hasOverflow=${hasOverflow}, atStart=${atStart}, atEnd=${atEnd}`);
-
-        // Show/hide buttons based on scroll position
-        // Show prev button if there's overflow AND we're not at the start
-        this._scrollPrevButton.visible = hasOverflow && !atStart;
-        // Show next button if there's overflow (at start, show next to indicate more content)
-        this._scrollNextButton.visible = hasOverflow && !atEnd;
-
-        // Update button styling
-        const padding = this._settings.get_int('panel-padding');
+        // Calculate if there's overflow
+        const maxScroll = Math.max(0, adjustment.upper - adjustment.page_size);
+        // Need enough overflow to actually need scrolling (at least half an icon worth)
         const dashSize = this._settings.get_int('dash-size');
-        const buttonSize = dashSize - (padding * 2);
+        const padding = this._settings.get_int('panel-padding');
+        const containerSize = dashSize - (padding * 2);
+        const minOverflowForScroll = containerSize / 2; // Need at least half an icon hidden to show scroll
+
+        const hasOverflow = maxScroll > minOverflowForScroll;
+        // Use a tolerance of 10px for detecting start/end positions
+        const tolerance = 10;
+        const atStart = adjustment.value < tolerance;
+        const atEnd = adjustment.value >= (maxScroll - tolerance) || maxScroll <= minOverflowForScroll;
+
+        log(`Scroll: value=${adjustment.value}, maxScroll=${maxScroll}, hasOverflow=${hasOverflow}, atStart=${atStart}, atEnd=${atEnd}`);
+
+        // Update button styling - icon size (12px) + 4px padding on each side = 20px
+        const scrollIconSize = 12;
+        const scrollButtonPadding = 4;
+        const buttonSize = scrollIconSize + (scrollButtonPadding * 2);
+
         const buttonStyle = `
-            padding: ${padding}px;
             background-color: rgba(255, 255, 255, 0.1);
+            border-radius: 4px;
             min-width: ${buttonSize}px;
             min-height: ${buttonSize}px;
+            max-width: ${buttonSize}px;
+            max-height: ${buttonSize}px;
+            padding: ${scrollButtonPadding}px;
         `;
-        this._scrollPrevButton.set_style(buttonStyle);
-        this._scrollNextButton.set_style(buttonStyle);
+
+        const buttonHoverStyle = `
+            background-color: rgba(255, 255, 255, 0.25);
+            border-radius: 4px;
+            min-width: ${buttonSize}px;
+            min-height: ${buttonSize}px;
+            max-width: ${buttonSize}px;
+            max-height: ${buttonSize}px;
+            padding: ${scrollButtonPadding}px;
+        `;
+
+        // Show/hide buttons based on scroll position
+        if (hasOverflow) {
+            this._scrollPrevButton.visible = !atStart;
+            this._scrollPrevButton.set_style(buttonStyle);
+            this._scrollPrevButton._normalStyle = buttonStyle;
+            this._scrollPrevButton._hoverStyle = buttonHoverStyle;
+
+            this._scrollNextButton.visible = !atEnd;
+            this._scrollNextButton.set_style(buttonStyle);
+            this._scrollNextButton._normalStyle = buttonStyle;
+            this._scrollNextButton._hoverStyle = buttonHoverStyle;
+        } else {
+            this._scrollPrevButton.visible = false;
+            this._scrollNextButton.visible = false;
+        }
+
+        // Update icon sizes
+        this._scrollPrevIcon.icon_size = scrollIconSize;
+        this._scrollNextIcon.icon_size = scrollIconSize;
     }
 
     _updateIconSpacing() {
