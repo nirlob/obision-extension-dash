@@ -47,6 +47,13 @@
       <description>Make panel background transparent</description>
     </key>
     
+    <key name="background-opacity" type="i">
+      <default>50</default>
+      <range min="0" max="100"/>
+      <summary>Background opacity</summary>
+      <description>Opacity of the transparent background (0-100%)</description>
+    </key>
+    
     <key name="background-color" type="s">
       <default>"rgba(0,0,0,0.8)"</default>
       <summary>Background color</summary>

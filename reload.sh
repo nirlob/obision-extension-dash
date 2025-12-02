@@ -1,4 +1,5 @@
 #!/bin/bash
+#!/bin/bash
 
 # Script to reload the GNOME Shell extension
 
