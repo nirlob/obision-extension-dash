@@ -59,6 +59,8 @@ export default class ObisionExtensionDash extends Extension {
         this._panelEnterId = null;
         this._panelLeaveId = null;
         this._hoverZone = null;
+        // Show desktop button
+        this._showDesktopButton = null;
         // New: our own app icons
         this._appIconsBox = null;
         this._appIcons = [];
@@ -310,10 +312,30 @@ export default class ObisionExtensionDash extends Extension {
             this._topBarContainer.add_child(this._topPanel._rightBox);
         }
 
-        // Add containers to main panel: show apps + scroll container (expands) + topbar (shrinks to content)
+        // Create show desktop button container
+        this._showDesktopContainer = new St.BoxLayout({
+            name: 'obision-show-desktop-container',
+            vertical: false,
+            x_expand: false,
+            y_expand: true,
+            x_align: Clutter.ActorAlign.END,
+            y_align: Clutter.ActorAlign.FILL,
+        });
+
+        // Create show desktop button
+        log('About to create show desktop button');
+        try {
+            this._createShowDesktopButton();
+            log('Show desktop button created successfully');
+        } catch (e) {
+            log(`ERROR creating show desktop button: ${e.message}`);
+        }
+
+        // Add containers to main panel: show apps + scroll container (expands) + show desktop + topbar (shrinks to content)
         this._panel.add_child(this._showAppsContainer);
         this._panel.add_child(this._scrollContainer);
         this._panel.add_child(this._topBarContainer);
+        this._panel.add_child(this._showDesktopContainer);
 
         // Add right-click handler for dash context menu on the panel itself
         this._panel.set_reactive(true);
@@ -460,6 +482,8 @@ export default class ObisionExtensionDash extends Extension {
             this._settings.connect('changed::date-show-year', () => this._updateDateFormat()),
             this._settings.connect('changed::system-icon-size', () => this._updateSystemIconStyling()),
             this._settings.connect('changed::system-icon-margins', () => this._updateSystemIconStyling()),
+            this._settings.connect('changed::show-desktop-button-width', () => this._createShowDesktopButton()),
+            this._settings.connect('changed::show-desktop-button-margin', () => this._createShowDesktopButton()),
             this._settings.connect('changed::show-apps-separator', () => this._updateShowAppsSeparator()),
             this._settings.connect('changed::separator-width', () => this._updateShowAppsSeparator()),
             this._settings.connect('changed::icon-corner-radius', () => this._updateIconStyling()),
@@ -496,15 +520,6 @@ export default class ObisionExtensionDash extends Extension {
             return GLib.SOURCE_REMOVE;
         });
 
-        // Add keybinding to toggle
-        Main.wm.addKeybinding(
-            'toggle-dash',
-            this._settings,
-            Meta.KeyBindingFlags.NONE,
-            Shell.ActionMode.NORMAL,
-            () => this._togglePanel()
-        );
-
         log('Obision Extension Dash enabled');
     }
 
@@ -516,9 +531,6 @@ export default class ObisionExtensionDash extends Extension {
             Main.layoutManager.disconnect(this._startupCompleteId);
             this._startupCompleteId = null;
         }
-
-        // Remove keybinding
-        Main.wm.removeKeybinding('toggle-dash');
 
         // Disable auto-hide and clean up
         this._disableAutoHide();
@@ -705,6 +717,15 @@ export default class ObisionExtensionDash extends Extension {
             this._showAppsContainer = null;
         }
 
+        if (this._showDesktopContainer) {
+            this._showDesktopContainer.destroy();
+            this._showDesktopContainer = null;
+        }
+
+        if (this._showDesktopButton) {
+            this._showDesktopButton = null;
+        }
+
         if (this._scrollContainer) {
             this._scrollContainer.destroy();
             this._scrollContainer = null;
@@ -887,6 +908,104 @@ export default class ObisionExtensionDash extends Extension {
         this._showAppsContainer.destroy_all_children();
         this._showAppsContainer.add_child(button);
         this._showAppsButton = button;
+    }
+
+    _createShowDesktopButton() {
+        if (!this._showDesktopContainer) {
+            log('ERROR: _showDesktopContainer is null!');
+            return;
+        }
+
+        const dashSize = this._settings.get_int('dash-size');
+        const buttonWidth = this._settings.get_int('show-desktop-button-width');
+        const position = this._settings.get_string('dash-position');
+        const isVertical = (position === 'LEFT' || position === 'RIGHT');
+
+        log(`Creating show desktop button: dashSize=${dashSize}, buttonWidth=${buttonWidth}, isVertical=${isVertical}`);
+
+        // Button fills the full height/width of the panel depending on orientation
+        const button = new St.Button({
+            style_class: 'show-desktop-button',
+            reactive: true,
+            can_focus: true,
+            track_hover: true,
+        });
+
+        // Set explicit size
+        if (isVertical) {
+            button.set_size(dashSize, buttonWidth);
+        } else {
+            button.set_size(buttonWidth, dashSize);
+        }
+
+        button._isVertical = isVertical;
+
+        // Get margin setting
+        const margin = this._settings.get_int('show-desktop-button-margin');
+        const marginStyle = isVertical ? `margin-top: ${margin}px;` : `margin-left: ${margin}px;`;
+
+        // Transparent by default, opaque on hover
+        button.set_style(`background-color: transparent; border-radius: 0; ${marginStyle}`);
+
+        button.connect('notify::hover', () => {
+            if (button.hover) {
+                button.set_style(`background-color: rgba(255,255,255,0.3); border-radius: 0; ${marginStyle}`);
+            } else {
+                button.set_style(`background-color: transparent; border-radius: 0; ${marginStyle}`);
+            }
+        });
+
+        button.connect('clicked', () => {
+            // Toggle show desktop - same behavior as Super+D (no animations)
+            const workspace = global.workspace_manager.get_active_workspace();
+            const windows = workspace.list_windows().filter(w =>
+                !w.is_skip_taskbar() &&
+                w.get_window_type() === Meta.WindowType.NORMAL
+            );
+
+            const allMinimized = windows.every(w => w.minimized);
+
+            // Temporarily disable animations
+            const settings = new imports.gi.Gio.Settings({ schema: 'org.gnome.desktop.interface' });
+            const animationsEnabled = settings.get_boolean('enable-animations');
+
+            if (animationsEnabled) {
+                settings.set_boolean('enable-animations', false);
+            }
+
+            if (allMinimized) {
+                // Restore windows
+                windows.forEach(w => w.unminimize());
+                // Activate the last window to restore focus
+                if (windows.length > 0) {
+                    const lastWindow = windows[windows.length - 1];
+                    lastWindow.activate(global.get_current_time());
+                }
+            } else {
+                // Minimize all windows
+                windows.filter(w => !w.minimized && w.can_minimize())
+                    .forEach(w => w.minimize());
+            }
+
+            // Re-enable animations and update focused app after a short delay
+            GLib.timeout_add(GLib.PRIORITY_DEFAULT, 100, () => {
+                if (animationsEnabled) {
+                    settings.set_boolean('enable-animations', true);
+                }
+                // Update icon focus states
+                this._updateFocusedApp();
+                return GLib.SOURCE_REMOVE;
+            });
+        });
+
+        // No padding on container - button fills full height/width
+        this._showDesktopContainer.set_style('padding: 0;');
+        this._showDesktopContainer.vertical = isVertical;
+
+        // Clear and add to container
+        this._showDesktopContainer.destroy_all_children();
+        this._showDesktopContainer.add_child(button);
+        this._showDesktopButton = button;
     }
 
     _updateShowAppsButtonState(active) {
@@ -1847,6 +1966,7 @@ export default class ObisionExtensionDash extends Extension {
                 this._panel.set_size(monitor.width, topPanelHeight + dashSize);
                 this._panel.vertical = false;
                 this._showAppsContainer.vertical = false;
+                this._showDesktopContainer.vertical = false;
                 this._scrollContainer.vertical = false;
                 this._scrollContainer.x_align = Clutter.ActorAlign.START;
                 this._scrollContainer.y_align = Clutter.ActorAlign.CENTER;
@@ -1868,6 +1988,7 @@ export default class ObisionExtensionDash extends Extension {
                 this._panel.set_size(dashSize, monitor.height);
                 this._panel.vertical = true;
                 this._showAppsContainer.vertical = true;
+                this._showDesktopContainer.vertical = true;
                 this._scrollContainer.vertical = true;
                 this._scrollContainer.x_align = Clutter.ActorAlign.CENTER;
                 this._scrollContainer.y_align = Clutter.ActorAlign.START;
@@ -1889,6 +2010,7 @@ export default class ObisionExtensionDash extends Extension {
                 this._panel.set_size(dashSize, monitor.height);
                 this._panel.vertical = true;
                 this._showAppsContainer.vertical = true;
+                this._showDesktopContainer.vertical = true;
                 this._scrollContainer.vertical = true;
                 this._scrollContainer.x_align = Clutter.ActorAlign.CENTER;
                 this._scrollContainer.y_align = Clutter.ActorAlign.START;

@@ -35,12 +35,6 @@
       <description>Hide dash when not in use</description>
     </key>
     
-    <key name="toggle-dash" type="as">
-      <default>["&lt;Super&gt;d"]</default>
-      <summary>Toggle dash visibility</summary>
-      <description>Keyboard shortcut to toggle dash visibility</description>
-    </key>
-    
     <key name="transparent-background" type="b">
       <default>false</default>
       <summary>Transparent background</summary>
@@ -115,6 +109,20 @@
       <default>true</default>
       <summary>Show year in date</summary>
       <description>Display the year in the date format</description>
+    </key>
+    
+    <key name="show-desktop-button-width" type="i">
+      <default>5</default>
+      <range min="1" max="20"/>
+      <summary>Show Desktop button width</summary>
+      <description>Width of the Show Desktop button in pixels</description>
+    </key>
+    
+    <key name="show-desktop-button-margin" type="i">
+      <default>0</default>
+      <range min="0" max="20"/>
+      <summary>Show Desktop button margin</summary>
+      <description>Margin between Show Desktop button and system icons</description>
     </key>
     
     <key name="system-icon-size" type="i">

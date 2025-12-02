@@ -601,6 +601,53 @@ const SystemPanelSettingsPage = GObject.registerClass(
             );
 
             iconsGroup.add(iconMarginsRow);
+
+            // Show Desktop group
+            const showDesktopGroup = new Adw.PreferencesGroup({
+                title: 'Show Desktop',
+                description: 'Configure Show Desktop button',
+            });
+            this.add(showDesktopGroup);
+
+            // Show Desktop button width
+            const showDesktopWidthRow = new Adw.SpinRow({
+                title: 'Button Width',
+                subtitle: 'Width of the Show Desktop button in pixels',
+                adjustment: new Gtk.Adjustment({
+                    lower: 1,
+                    upper: 20,
+                    step_increment: 1,
+                }),
+            });
+
+            settings.bind(
+                'show-desktop-button-width',
+                showDesktopWidthRow,
+                'value',
+                Gio.SettingsBindFlags.DEFAULT
+            );
+
+            showDesktopGroup.add(showDesktopWidthRow);
+
+            // Show Desktop button margin
+            const showDesktopMarginRow = new Adw.SpinRow({
+                title: 'Margin',
+                subtitle: 'Margin between button and system icons',
+                adjustment: new Gtk.Adjustment({
+                    lower: 0,
+                    upper: 20,
+                    step_increment: 1,
+                }),
+            });
+
+            settings.bind(
+                'show-desktop-button-margin',
+                showDesktopMarginRow,
+                'value',
+                Gio.SettingsBindFlags.DEFAULT
+            );
+
+            showDesktopGroup.add(showDesktopMarginRow);
         }
     });
 
