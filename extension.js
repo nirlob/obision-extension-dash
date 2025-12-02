@@ -52,6 +52,13 @@ export default class ObisionExtensionDash extends Extension {
         this._dashBoxNotifyOpacityId = null;
         this._visibilityCheckId = null;
         this._startupCompleteId = null;
+        // Auto-hide
+        this._autoHideEnabled = false;
+        this._panelHidden = false;
+        this._autoHideTimeoutId = null;
+        this._panelEnterId = null;
+        this._panelLeaveId = null;
+        this._hoverZone = null;
         // New: our own app icons
         this._appIconsBox = null;
         this._appIcons = [];
@@ -408,7 +415,13 @@ export default class ObisionExtensionDash extends Extension {
 
         // Connect to settings changes
         this._settingsChangedIds = [
-            this._settings.connect('changed::dash-position', () => this._updatePanelPosition()),
+            this._settings.connect('changed::dash-position', () => {
+                this._updatePanelPosition();
+                // Update hover zone position if auto-hide is enabled
+                if (this._autoHideEnabled) {
+                    this._createHoverZone();
+                }
+            }),
             this._settings.connect('changed::dash-size', () => this._updatePanelPosition()),
             this._settings.connect('changed::icon-spacing', () => this._updateIconSpacing()),
             this._settings.connect('changed::panel-padding', () => this._updatePanelPadding()),
@@ -459,7 +472,11 @@ export default class ObisionExtensionDash extends Extension {
             this._settings.connect('changed::icon-hover-border-color', () => this._updateIconStyling()),
             this._settings.connect('changed::icon-selected-show-border', () => this._updateIconStyling()),
             this._settings.connect('changed::icon-selected-border-color', () => this._updateIconStyling()),
+            this._settings.connect('changed::auto-hide', () => this._updateAutoHide()),
         ];
+
+        // Setup auto-hide if enabled
+        this._updateAutoHide();
 
         // Apply styles with delays to ensure panel is ready
         GLib.timeout_add(GLib.PRIORITY_DEFAULT, 50, () => {
@@ -502,6 +519,10 @@ export default class ObisionExtensionDash extends Extension {
 
         // Remove keybinding
         Main.wm.removeKeybinding('toggle-dash');
+
+        // Disable auto-hide and clean up
+        this._disableAutoHide();
+        this._autoHideEnabled = false;
 
         // Disconnect clock format handler
         if (this._clockNotifyId && this._dateMenu && this._dateMenu._clock) {
@@ -2059,6 +2080,273 @@ export default class ObisionExtensionDash extends Extension {
         if (this._panel) {
             this._panel.visible = !this._panel.visible;
         }
+    }
+
+    _updateAutoHide() {
+        const autoHide = this._settings.get_boolean('auto-hide');
+
+        log(`_updateAutoHide: autoHide=${autoHide}, _autoHideEnabled=${this._autoHideEnabled}`);
+
+        if (autoHide && !this._autoHideEnabled) {
+            // Enable auto-hide
+            this._autoHideEnabled = true;
+            this._setupAutoHide();
+        } else if (!autoHide && this._autoHideEnabled) {
+            // Disable auto-hide
+            this._autoHideEnabled = false;
+            this._disableAutoHide();
+        }
+    }
+
+    _setupAutoHide() {
+        if (!this._panel) return;
+
+        log('_setupAutoHide: Setting up auto-hide');
+
+        // Store original panel position for restoration
+        this._panelOriginalX = this._panel.x;
+        this._panelOriginalY = this._panel.y;
+
+        // Connect to panel enter/leave events
+        this._panelEnterId = this._panel.connect('enter-event', () => {
+            log('Panel enter-event');
+            this._onPanelEnter();
+        });
+
+        this._panelLeaveId = this._panel.connect('leave-event', () => {
+            log('Panel leave-event');
+            this._onPanelLeave();
+        });
+
+        // Create hover zone at panel edge to trigger show
+        this._createHoverZone();
+
+        // Initially hide the panel after a short delay
+        this._autoHideTimeoutId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 500, () => {
+            this._autoHideTimeoutId = null;
+            this._hidePanel();
+            return GLib.SOURCE_REMOVE;
+        });
+    }
+
+    _disableAutoHide() {
+        log('_disableAutoHide: Disabling auto-hide');
+
+        // Disconnect panel events
+        if (this._panelEnterId && this._panel) {
+            this._panel.disconnect(this._panelEnterId);
+            this._panelEnterId = null;
+        }
+
+        if (this._panelLeaveId && this._panel) {
+            this._panel.disconnect(this._panelLeaveId);
+            this._panelLeaveId = null;
+        }
+
+        // Remove hover zone
+        if (this._hoverZone) {
+            Main.layoutManager.removeChrome(this._hoverZone);
+            this._hoverZone.destroy();
+            this._hoverZone = null;
+        }
+
+        // Cancel any pending timeout
+        if (this._autoHideTimeoutId) {
+            GLib.source_remove(this._autoHideTimeoutId);
+            this._autoHideTimeoutId = null;
+        }
+
+        // Show the panel immediately
+        this._showPanelImmediate();
+    }
+
+    _createHoverZone() {
+        if (this._hoverZone) {
+            Main.layoutManager.removeChrome(this._hoverZone);
+            this._hoverZone.destroy();
+        }
+
+        const monitor = Main.layoutManager.primaryMonitor;
+        const position = this._settings.get_string('dash-position');
+        const hoverSize = 5; // pixels to trigger show
+
+        let x, y, width, height;
+
+        switch (position) {
+            case 'TOP':
+                x = monitor.x;
+                y = monitor.y;
+                width = monitor.width;
+                height = hoverSize;
+                break;
+            case 'BOTTOM':
+                x = monitor.x;
+                y = monitor.y + monitor.height - hoverSize;
+                width = monitor.width;
+                height = hoverSize;
+                break;
+            case 'LEFT':
+                x = monitor.x;
+                y = monitor.y;
+                width = hoverSize;
+                height = monitor.height;
+                break;
+            case 'RIGHT':
+                x = monitor.x + monitor.width - hoverSize;
+                y = monitor.y;
+                width = hoverSize;
+                height = monitor.height;
+                break;
+            default:
+                return;
+        }
+
+        this._hoverZone = new St.Widget({
+            name: 'obision-hover-zone',
+            reactive: true,
+            track_hover: true,
+            x: x,
+            y: y,
+            width: width,
+            height: height,
+        });
+
+        this._hoverZone.connect('enter-event', () => {
+            log('Hover zone enter-event');
+            this._showPanel();
+        });
+
+        Main.layoutManager.addChrome(this._hoverZone, {
+            affectsStruts: false,
+            trackFullscreen: true,
+        });
+
+        log(`_createHoverZone: Created at x=${x}, y=${y}, width=${width}, height=${height}`);
+    }
+
+    _onPanelEnter() {
+        // Cancel any hide timeout
+        if (this._autoHideTimeoutId) {
+            GLib.source_remove(this._autoHideTimeoutId);
+            this._autoHideTimeoutId = null;
+        }
+    }
+
+    _onPanelLeave() {
+        if (!this._autoHideEnabled) return;
+
+        // Cancel any existing timeout
+        if (this._autoHideTimeoutId) {
+            GLib.source_remove(this._autoHideTimeoutId);
+            this._autoHideTimeoutId = null;
+        }
+
+        // Hide after delay
+        this._autoHideTimeoutId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 300, () => {
+            this._autoHideTimeoutId = null;
+            this._hidePanel();
+            return GLib.SOURCE_REMOVE;
+        });
+    }
+
+    _showPanel() {
+        if (!this._panel) return;
+        if (!this._panelHidden) return;
+
+        log('_showPanel: Showing panel');
+
+        this._panelHidden = false;
+
+        const monitor = Main.layoutManager.primaryMonitor;
+        const position = this._settings.get_string('dash-position');
+        const dashSize = this._settings.get_int('dash-size');
+
+        let targetX, targetY;
+
+        switch (position) {
+            case 'TOP':
+                targetX = monitor.x;
+                targetY = monitor.y;
+                break;
+            case 'BOTTOM':
+                targetX = monitor.x;
+                targetY = monitor.y + monitor.height - this._panel.height;
+                break;
+            case 'LEFT':
+                targetX = monitor.x;
+                targetY = monitor.y;
+                break;
+            case 'RIGHT':
+                targetX = monitor.x + monitor.width - dashSize;
+                targetY = monitor.y;
+                break;
+            default:
+                return;
+        }
+
+        // Animate panel in
+        this._panel.ease({
+            x: targetX,
+            y: targetY,
+            opacity: 255,
+            duration: 200,
+            mode: Clutter.AnimationMode.EASE_OUT_QUAD,
+        });
+    }
+
+    _showPanelImmediate() {
+        if (!this._panel) return;
+
+        this._panelHidden = false;
+        this._panel.opacity = 255;
+
+        // Restore position
+        this._updatePanelPosition();
+    }
+
+    _hidePanel() {
+        if (!this._panel) return;
+        if (this._panelHidden) return;
+
+        // Don't hide if a menu is open
+        if (this._menu && this._menu.isOpen) return;
+        if (this._appContextMenu && this._appContextMenu.isOpen) return;
+        if (this._showAppsContextMenu && this._showAppsContextMenu.isOpen) return;
+        if (this._dashContextMenu && this._dashContextMenu.isOpen) return;
+
+        log('_hidePanel: Hiding panel');
+
+        this._panelHidden = true;
+
+        const monitor = Main.layoutManager.primaryMonitor;
+        const position = this._settings.get_string('dash-position');
+
+        let targetX = this._panel.x;
+        let targetY = this._panel.y;
+
+        // Move panel off-screen based on position
+        switch (position) {
+            case 'TOP':
+                targetY = monitor.y - this._panel.height;
+                break;
+            case 'BOTTOM':
+                targetY = monitor.y + monitor.height;
+                break;
+            case 'LEFT':
+                targetX = monitor.x - this._panel.width;
+                break;
+            case 'RIGHT':
+                targetX = monitor.x + monitor.width;
+                break;
+        }
+
+        // Animate panel out
+        this._panel.ease({
+            x: targetX,
+            y: targetY,
+            duration: 200,
+            mode: Clutter.AnimationMode.EASE_OUT_QUAD,
+        });
     }
 
     _updatePanelBackground() {
