@@ -12,7 +12,7 @@
     "deploy": "npm run build && npm run install && echo '\n✓ Extension installed! Restart GNOME Shell:' && echo '  X11: Alt+F2 → type r → Enter' && echo '  Wayland: Log out and back in' && echo '\nThen run: npm run enable'",
     "reload": "./scripts/reload.sh",
     "update": "npm run build && npm run install && npm run reload",
-    "build-deb": "./scripts/build-deb.sh",
+    "deb-build": "./scripts/build-deb.sh",
     "clean": "rm -rf builddir schemas/gschemas.compiled",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
