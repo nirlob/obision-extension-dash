@@ -9,7 +9,7 @@
 node_modules/
 
 # Build output
-build/
+builddir/
 
 # Compiled schemas
 schemas/gschemas.compiled

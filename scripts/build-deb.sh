@@ -14,7 +14,7 @@ echo -e "${BLUE}🔨 Building .deb package for obision-extension-dash${NC}"
 VERSION=$(jq -r .version metadata.json)
 EXTENSION_UUID="obision-extension-dash@obision.com"
 PACKAGE_NAME="gnome-shell-extension-obision-dash"
-OUTPUT_DIR="build"
+OUTPUT_DIR="builddir"
 DEB_FILE="${OUTPUT_DIR}/obision-extension-dash.deb"
 BUILD_DIR="deb-build"
 
