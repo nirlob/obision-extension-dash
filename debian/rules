@@ -9,7 +9,12 @@ override_dh_auto_configure:
 
 override_dh_auto_build:
 	glib-compile-schemas schemas/
-	gnome-extensions pack --force --extra-source=schemas/ --out-dir=.
+	zip -r obision-extension-dash@obision.com.shell-extension.zip \
+		extension.js \
+		metadata.json \
+		prefs.js \
+		stylesheet.css \
+		schemas/
 
 override_dh_auto_install:
 	mkdir -p debian/gnome-shell-extension-obision-dash/usr/share/gnome-shell/extensions/obision-extension-dash@obision.com
