@@ -1,3 +1,9 @@
+obision-extension-dash (1.1.0-1) unstable; urgency=medium
+
+  * Release version 1.1.0
+
+ -- Jose Francisco Gonzalez <jfgs1609@gmail.com>  Sat, 06 Dec 2025 19:22:17 +0100
+
 obision-extension-dash (1-1) unstable; urgency=medium
 
   * Initial release
