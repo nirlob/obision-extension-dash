@@ -1,0 +1,244 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist>
+  <schema id="org.gnome.shell.extensions.obision-extension-dash" path="/org/gnome/shell/extensions/obision-extension-dash/">
+    
+    <key name="dash-position" type="s">
+      <default>"BOTTOM"</default>
+      <summary>Dash position</summary>
+      <description>Position of the dash panel (LEFT, RIGHT, TOP, BOTTOM)</description>
+    </key>
+    
+    <key name="dash-size" type="i">
+      <default>64</default>
+      <range min="40" max="200"/>
+      <summary>Dash size</summary>
+      <description>Width (for left/right) or height (for top/bottom) of the dash in pixels</description>
+    </key>
+    
+    <key name="icon-spacing" type="i">
+      <default>0</default>
+      <range min="0" max="32"/>
+      <summary>Icon spacing</summary>
+      <description>Space between icons in pixels</description>
+    </key>
+    
+    <key name="panel-padding" type="i">
+      <default>0</default>
+      <range min="0" max="32"/>
+      <summary>Panel padding</summary>
+      <description>Padding between panel edge and icons in pixels</description>
+    </key>
+    
+    <key name="auto-hide" type="b">
+      <default>false</default>
+      <summary>Auto-hide dash</summary>
+      <description>Hide dash when not in use</description>
+    </key>
+    
+    <key name="panel-separator-visible" type="b">
+      <default>false</default>
+      <summary>Panel separator visible</summary>
+      <description>Show separator line between panel and desktop</description>
+    </key>
+    
+    <key name="panel-separator-size" type="i">
+      <default>1</default>
+      <range min="1" max="10"/>
+      <summary>Panel separator size</summary>
+      <description>Size of the separator line in pixels</description>
+    </key>
+    
+    <key name="panel-separator-margin" type="i">
+      <default>0</default>
+      <range min="0" max="20"/>
+      <summary>Panel separator margin</summary>
+      <description>Margin between separator and desktop</description>
+    </key>
+    
+    <key name="panel-separator-color" type="s">
+      <default>"rgba(255,255,255,0.3)"</default>
+      <summary>Panel separator color</summary>
+      <description>Color of the separator line</description>
+    </key>
+    
+    <key name="transparent-background" type="b">
+      <default>false</default>
+      <summary>Transparent background</summary>
+      <description>Make panel background transparent</description>
+    </key>
+    
+    <key name="background-opacity" type="i">
+      <default>50</default>
+      <range min="0" max="100"/>
+      <summary>Background opacity</summary>
+      <description>Opacity of the transparent background (0-100%)</description>
+    </key>
+    
+    <key name="background-color" type="s">
+      <default>"rgba(46,44,44,0.8)"</default>
+      <summary>Background color</summary>
+      <description>Solid background color for the panel</description>
+    </key>
+    
+    <key name="date-position" type="s">
+      <default>"left"</default>
+      <summary>Date position</summary>
+      <description>Position of the date in top bar (left, down)</description>
+    </key>
+    
+    <key name="date-spacing" type="i">
+      <default>5</default>
+      <range min="0" max="50"/>
+      <summary>Date spacing</summary>
+      <description>Vertical space between icons and date in pixels</description>
+    </key>
+    
+    <key name="time-font-size" type="i">
+      <default>20</default>
+      <range min="8" max="30"/>
+      <summary>Time font size</summary>
+      <description>Font size for time text in pixels</description>
+    </key>
+    
+    <key name="time-font-bold" type="b">
+      <default>false</default>
+      <summary>Time font bold</summary>
+      <description>Make time text bold</description>
+    </key>
+    
+    <key name="date-font-size" type="i">
+      <default>15</default>
+      <range min="8" max="30"/>
+      <summary>Date font size</summary>
+      <description>Font size for date text in pixels</description>
+    </key>
+    
+    <key name="date-font-bold" type="b">
+      <default>false</default>
+      <summary>Date font bold</summary>
+      <description>Make date text bold</description>
+    </key>
+    
+    <key name="time-visible" type="b">
+      <default>true</default>
+      <summary>Show time</summary>
+      <description>Show or hide the time display</description>
+    </key>
+    
+    <key name="date-visible" type="b">
+      <default>true</default>
+      <summary>Show date</summary>
+      <description>Show or hide the date display</description>
+    </key>
+    
+    <key name="date-show-year" type="b">
+      <default>true</default>
+      <summary>Show year in date</summary>
+      <description>Display the year in the date format</description>
+    </key>
+    
+    <key name="show-desktop-button-width" type="i">
+      <default>5</default>
+      <range min="1" max="20"/>
+      <summary>Show Desktop button width</summary>
+      <description>Width of the Show Desktop button in pixels</description>
+    </key>
+    
+    <key name="show-desktop-button-margin" type="i">
+      <default>0</default>
+      <range min="0" max="20"/>
+      <summary>Show Desktop button margin</summary>
+      <description>Margin between Show Desktop button and system icons</description>
+    </key>
+    
+    <key name="system-icon-size" type="i">
+      <default>20</default>
+      <range min="12" max="32"/>
+      <summary>System icon size</summary>
+      <description>Size of system panel icons in pixels</description>
+    </key>
+    
+    <key name="system-icon-margins" type="i">
+      <default>5</default>
+      <range min="0" max="20"/>
+      <summary>System icon margins</summary>
+      <description>Margin applied to left and right of each system icon in pixels</description>
+    </key>
+    
+    <key name="show-apps-separator" type="b">
+      <default>true</default>
+      <summary>Show Applications separator</summary>
+      <description>Show separator after Show Applications button</description>
+    </key>
+    
+    <key name="separator-width" type="i">
+      <default>1</default>
+      <range min="1" max="10"/>
+      <summary>Separator width</summary>
+      <description>Width of the separator line in pixels</description>
+    </key>
+    
+    <key name="icon-corner-radius" type="i">
+      <default>0</default>
+      <range min="0" max="50"/>
+      <summary>Icon corner radius</summary>
+      <description>Corner radius for icon backgrounds in pixels</description>
+    </key>
+    
+    <key name="icon-use-main-bg-color" type="b">
+      <default>true</default>
+      <summary>Use main panel background color</summary>
+      <description>Use the same background color as the main panel for icons</description>
+    </key>
+    
+    <key name="icon-background-color" type="s">
+      <default>"rgba(128,128,128,0.8)"</default>
+      <summary>Icon background color</summary>
+      <description>Custom background color for icons</description>
+    </key>
+    
+    <key name="icon-size-multiplier" type="i">
+      <default>7</default>
+      <range min="1" max="8"/>
+      <summary>Icon size multiplier</summary>
+      <description>Multiplier for icon size (1-8, default 7 = 0.7)</description>
+    </key>
+    
+    <key name="icon-normal-show-border" type="b">
+      <default>false</default>
+      <summary>Show icon normal border</summary>
+      <description>Show border around icon backgrounds in normal state</description>
+    </key>
+    
+    <key name="icon-normal-border-color" type="s">
+      <default>"rgba(128,128,128,1.0)"</default>
+      <summary>Icon normal border color</summary>
+      <description>Color for icon borders in normal state</description>
+    </key>
+    
+    <key name="icon-hover-show-border" type="b">
+      <default>false</default>
+      <summary>Show icon hover border</summary>
+      <description>Show border around icon backgrounds in hover state</description>
+    </key>
+    
+    <key name="icon-hover-border-color" type="s">
+      <default>"rgba(255,255,255,1.0)"</default>
+      <summary>Icon hover border color</summary>
+      <description>Color for icon borders in hover state</description>
+    </key>
+    
+    <key name="icon-selected-show-border" type="b">
+      <default>false</default>
+      <summary>Show icon selected border</summary>
+      <description>Show border around icon backgrounds in selected state</description>
+    </key>
+    
+    <key name="icon-selected-border-color" type="s">
+      <default>"rgba(255,255,255,1.0)"</default>
+      <summary>Icon selected border color</summary>
+      <description>Color for icon borders in selected state</description>
+    </key>
+    
+  </schema>
+</schemalist>

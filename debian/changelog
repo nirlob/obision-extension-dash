@@ -1,0 +1,10 @@
+obision-extension-dash (1-1) unstable; urgency=medium
+
+  * Initial release
+  * Add Show Desktop button feature
+  * Add panel separator with customization options
+  * Add icon background and border customization
+  * Add color picker with popover to avoid grid conflicts
+  * Add auto-hide panel support
+
+ -- Jose Francisco Gonzalez <jfgs1609@gmail.com>  Fri, 06 Dec 2024 19:00:00 +0100

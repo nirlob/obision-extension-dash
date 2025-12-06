@@ -1,0 +1,11 @@
+{
+  "name": "Obision Dash",
+  "description": "Custom dash panel that reuses GNOME Shell's native dash",
+  "uuid": "obision-extension-dash@obision.com",
+  "shell-version": [
+    "48"
+  ],
+  "version": 1,
+  "url": "https://github.com/nirlob/obision-extension-dash",
+  "settings-schema": "org.gnome.shell.extensions.obision-extension-dash"
+}

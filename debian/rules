@@ -1,0 +1,21 @@
+#!/usr/bin/make -f
+
+export DH_VERBOSE = 1
+
+%:
+	dh $@
+
+override_dh_auto_configure:
+
+override_dh_auto_build:
+	glib-compile-schemas schemas/
+	gnome-extensions pack --force --extra-source=schemas/ --out-dir=.
+
+override_dh_auto_install:
+	mkdir -p debian/gnome-shell-extension-obision-dash/usr/share/gnome-shell/extensions/obision-extension-dash@obision.com
+	unzip -q obision-extension-dash@obision.com.shell-extension.zip -d debian/gnome-shell-extension-obision-dash/usr/share/gnome-shell/extensions/obision-extension-dash@obision.com/
+
+override_dh_auto_clean:
+	rm -f *.zip
+	rm -f schemas/gschemas.compiled
+	dh_clean
