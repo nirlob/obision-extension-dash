@@ -87,7 +87,7 @@
     </key>
     
     <key name="date-spacing" type="i">
-      <default>5</default>
+      <default>10</default>
       <range min="0" max="50"/>
       <summary>Date spacing</summary>
       <description>Vertical space between icons and date in pixels</description>

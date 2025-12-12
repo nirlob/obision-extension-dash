@@ -1940,24 +1940,28 @@ export default class ObisionExtensionDash extends Extension {
         const normalBorderColor = this._settings.get_string('icon-normal-border-color');
         const borderWidth = this._settings.get_int('icon-border-width');
 
-        // Check if any border is active
-        const hasBorder = normalShowBorder || hoverShowBorder || selectedShowBorder;
-
-        // Determine background color
+        // Determine background color for normal state
         let bgColor;
-        let hoverBgColor;
-        if (hasBorder) {
-            // If any border is active, don't use background colors
+        if (normalShowBorder) {
+            // If normal border is active, don't use background color
             bgColor = 'transparent';
-            hoverBgColor = 'transparent';
         } else if (useMainBgColor) {
             // When using main bg color, icons should be transparent to show the panel background
             // This way they have exactly the same transparency as the panel
             bgColor = 'transparent';
-            // For hover, use a visible semi-transparent white overlay
-            hoverBgColor = 'rgba(255, 255, 255, 0.2)';
         } else {
             bgColor = iconBgColor;
+        }
+
+        // Determine background color for hover state
+        let hoverBgColor;
+        if (hoverShowBorder) {
+            // If hover border is active, don't use background color
+            hoverBgColor = 'transparent';
+        } else if (useMainBgColor) {
+            // For hover with main bg color, use a visible semi-transparent white overlay
+            hoverBgColor = 'rgba(255, 255, 255, 0.2)';
+        } else {
             // Create a more visible hover color - lighten for dark backgrounds
             hoverBgColor = this._lightenColor(bgColor, 1.5);
         }
